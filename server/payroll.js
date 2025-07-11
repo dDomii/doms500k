@@ -1,58 +1,5 @@
 import { pool } from './database.js';
 
-// Helper function to recalculate user progress after time changes
-async function updateUserProgress(userId) {
-  try {
-    // Get total worked hours for the user (only completed shifts)
-    const [hoursResult] = await pool.execute(`
-      SELECT 
-        COALESCE(SUM(
-          CASE 
-            WHEN clock_out IS NOT NULL THEN 
-              TIMESTAMPDIFF(SECOND, clock_in, clock_out) / 3600
-            ELSE 0 
-          END
-        ), 0) as total_hours
-      FROM time_entries 
-      WHERE user_id = ?
-    `, [userId]);
-    
-    return parseFloat(hoursResult[0].total_hours) || 0;
-  } catch (error) {
-    console.error('Error updating user progress:', error);
-    return 0;
-  }
-}
-
-// Helper function to invalidate and regenerate affected payslips
-async function invalidateAffectedPayslips(userId, date) {
-  try {
-    // Find all payslips that might be affected by this time change
-    const [affectedPayslips] = await pool.execute(`
-      SELECT id, week_start, week_end 
-      FROM payslips 
-      WHERE user_id = ? 
-      AND (
-        (DATE(?) BETWEEN week_start AND week_end) OR
-        (week_start <= DATE(?) AND week_end >= DATE(?))
-      )
-    `, [userId, date, date, date]);
-    
-    // Mark these payslips as needing recalculation
-    for (const payslip of affectedPayslips) {
-      await pool.execute(
-        'UPDATE payslips SET status = "needs_recalculation" WHERE id = ?',
-        [payslip.id]
-      );
-    }
-    
-    return affectedPayslips.length;
-  } catch (error) {
-    console.error('Error invalidating payslips:', error);
-    return 0;
-  }
-}
-
 // Helper function to get breaktime setting
 async function getBreaktimeSetting() {
   try {

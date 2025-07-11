@@ -39,18 +39,8 @@ export function TimeTracking() {
     fetchTodayEntry();
     fetchOvertimeNotifications();
     fetchHoursProgress();
-    
-    // Set up real-time data refresh
-    const dataRefreshInterval = setInterval(() => {
-      fetchHoursProgress();
-    }, 30000); // Refresh every 30 seconds
-    
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    
-    return () => {
-      clearInterval(timer);
-      clearInterval(dataRefreshInterval);
-    };
+    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {

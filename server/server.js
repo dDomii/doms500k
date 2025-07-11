@@ -154,50 +154,21 @@ app.get('/api/user-hours-progress', authenticate, async (req, res) => {
     
     const requiredHours = parseFloat(userResult[0].required_hours) || 0;
     
-    // Get progress data from the new progress table
-    const [progressResult] = await pool.execute(`
+    // Get total worked hours for the user (only completed shifts)
+    const [hoursResult] = await pool.execute(`
       SELECT 
-        total_worked_hours,
-        total_overtime_hours,
-        total_days_worked,
-        total_late_instances,
-        last_updated
-      FROM user_progress 
+        COALESCE(SUM(
+          CASE 
+            WHEN clock_out IS NOT NULL THEN 
+              TIMESTAMPDIFF(SECOND, clock_in, clock_out) / 3600
+            ELSE 0 
+          END
+        ), 0) as total_hours
+      FROM time_entries 
       WHERE user_id = ?
     `, [req.user.userId]);
     
-    let workedHours = 0;
-    let additionalStats = {};
-    
-    if (progressResult.length > 0) {
-      workedHours = parseFloat(progressResult[0].total_worked_hours) || 0;
-      additionalStats = {
-        totalOvertimeHours: parseFloat(progressResult[0].total_overtime_hours) || 0,
-        totalDaysWorked: progressResult[0].total_days_worked || 0,
-        totalLateInstances: progressResult[0].total_late_instances || 0,
-        lastUpdated: progressResult[0].last_updated
-      };
-    } else {
-      // Fallback to calculating from time_entries if no progress record exists
-      const [hoursResult] = await pool.execute(`
-        SELECT 
-          COALESCE(SUM(
-            CASE 
-              WHEN clock_out IS NOT NULL THEN 
-                TIMESTAMPDIFF(SECOND, clock_in, clock_out) / 3600
-              ELSE 0 
-            END
-          ), 0) as total_hours
-        FROM time_entries 
-        WHERE user_id = ?
-      `, [req.user.userId]);
-      
-      workedHours = parseFloat(hoursResult[0].total_hours) || 0;
-      
-      // Create initial progress record
-      await updateUserProgressData(req.user.userId);
-    }
-    
+    const workedHours = parseFloat(hoursResult[0].total_hours) || 0;
     const remainingHours = Math.max(0, requiredHours - workedHours);
     const progressPercentage = requiredHours > 0 ? Math.min(100, (workedHours / requiredHours) * 100) : 0;
     
@@ -206,8 +177,7 @@ app.get('/api/user-hours-progress', authenticate, async (req, res) => {
       workedHours,
       remainingHours,
       progressPercentage,
-      isCompleted: workedHours >= requiredHours,
-      ...additionalStats
+      isCompleted: workedHours >= requiredHours
     });
   } catch (error) {
     console.error('Error fetching user hours progress:', error);
@@ -285,23 +255,11 @@ app.post('/api/users/:id/adjust-time', authenticate, async (req, res) => {
   const { date, clockIn, clockOut } = req.body;
 
   try {
-    // Get old values for logging
-    const [oldEntry] = await pool.execute(
-      'SELECT * FROM time_entries WHERE user_id = ? AND DATE(clock_in) = ?',
-      [id, date]
-    );
-    
     const weekStart = getWeekStart(new Date(date));
     
     // Delete existing entry for this date
     await pool.execute(
       'DELETE FROM time_entries WHERE user_id = ? AND DATE(clock_in) = ?',
-      [id, date]
-    );
-
-    // Also update/create user_daily_data
-    await pool.execute(
-      'DELETE FROM user_daily_data WHERE user_id = ? AND date = ?',
       [id, date]
     );
 
@@ -318,64 +276,6 @@ app.post('/api/users/:id/adjust-time', authenticate, async (req, res) => {
       [id, clockInDateTime, clockOutDateTime, date, weekStart]
     );
 
-    // Calculate hours and update daily data
-    let totalHours = 0;
-    let overtimeHours = 0;
-    let undertimeHours = 0;
-    let lateMinutes = 0;
-    
-    if (clockOutDateTime) {
-      totalHours = (clockOutDateTime - clockInDateTime) / (1000 * 60 * 60);
-      
-      // Check for late clock in (after 7:00 AM)
-      const shiftStart = new Date(clockInDateTime);
-      shiftStart.setHours(7, 0, 0, 0);
-      if (clockInDateTime > shiftStart) {
-        lateMinutes = Math.floor((clockInDateTime - shiftStart) / (1000 * 60));
-        undertimeHours = lateMinutes / 60;
-      }
-      
-      // Check for overtime (after 4:00 PM)
-      const overtimeStart = new Date(clockInDateTime);
-      overtimeStart.setHours(16, 0, 0, 0);
-      if (clockOutDateTime > overtimeStart) {
-        overtimeHours = Math.max(0, (clockOutDateTime - overtimeStart) / (1000 * 60 * 60));
-      }
-    }
-
-    // Insert/update daily data
-    await pool.execute(`
-      INSERT INTO user_daily_data 
-      (user_id, date, clock_in, clock_out, total_hours, overtime_hours, undertime_hours, late_minutes, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE
-      clock_in = VALUES(clock_in),
-      clock_out = VALUES(clock_out),
-      total_hours = VALUES(total_hours),
-      overtime_hours = VALUES(overtime_hours),
-      undertime_hours = VALUES(undertime_hours),
-      late_minutes = VALUES(late_minutes),
-      status = VALUES(status),
-      updated_at = CURRENT_TIMESTAMP
-    `, [id, date, clockInDateTime, clockOutDateTime, totalHours, overtimeHours, undertimeHours, lateMinutes, clockOutDateTime ? 'completed' : 'active']);
-
-    // Update user progress
-    await updateUserProgressData(id);
-    
-    // Invalidate affected payslips
-    const affectedPayslips = await invalidateAffectedPayslips(id, date);
-    
-    // Log the change
-    await pool.execute(`
-      INSERT INTO data_sync_log (user_id, action_type, affected_date, old_values, new_values, triggered_by)
-      VALUES (?, 'admin_adjustment', ?, ?, ?, ?)
-    `, [
-      id, 
-      date, 
-      JSON.stringify(oldEntry[0] || {}),
-      JSON.stringify({ clockIn, clockOut, totalHours, overtimeHours, undertimeHours }),
-      req.user.userId
-    ]);
     res.json({ success: true });
   } catch (error) {
     console.error('Time adjustment error:', error);
@@ -383,82 +283,6 @@ app.post('/api/users/:id/adjust-time', authenticate, async (req, res) => {
   }
 });
 
-// Helper function to update user progress data
-async function updateUserProgressData(userId) {
-  try {
-    // Calculate total worked hours, overtime, days worked, etc.
-    const [progressData] = await pool.execute(`
-      SELECT 
-        COALESCE(SUM(total_hours), 0) as total_worked_hours,
-        COALESCE(SUM(overtime_hours), 0) as total_overtime_hours,
-        COUNT(CASE WHEN status = 'completed' THEN 1 END) as total_days_worked,
-        COUNT(CASE WHEN late_minutes > 0 THEN 1 END) as total_late_instances,
-        MAX(clock_in) as last_clock_in,
-        MAX(clock_out) as last_clock_out
-      FROM user_daily_data 
-      WHERE user_id = ?
-    `, [userId]);
-    
-    const data = progressData[0];
-    
-    // Update or insert progress record
-    await pool.execute(`
-      INSERT INTO user_progress 
-      (user_id, total_worked_hours, total_overtime_hours, total_days_worked, total_late_instances, last_clock_in, last_clock_out)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE
-      total_worked_hours = VALUES(total_worked_hours),
-      total_overtime_hours = VALUES(total_overtime_hours),
-      total_days_worked = VALUES(total_days_worked),
-      total_late_instances = VALUES(total_late_instances),
-      last_clock_in = VALUES(last_clock_in),
-      last_clock_out = VALUES(last_clock_out),
-      last_updated = CURRENT_TIMESTAMP
-    `, [
-      userId,
-      data.total_worked_hours,
-      data.total_overtime_hours,
-      data.total_days_worked,
-      data.total_late_instances,
-      data.last_clock_in,
-      data.last_clock_out
-    ]);
-    
-    return true;
-  } catch (error) {
-    console.error('Error updating user progress:', error);
-    return false;
-  }
-}
-
-// Helper function to invalidate affected payslips
-async function invalidateAffectedPayslips(userId, date) {
-  try {
-    // Find all payslips that might be affected by this time change
-    const [affectedPayslips] = await pool.execute(`
-      SELECT id, week_start, week_end 
-      FROM payslips 
-      WHERE user_id = ? 
-      AND (
-        (DATE(?) BETWEEN week_start AND week_end) OR
-        (week_start <= DATE(?) AND week_end >= DATE(?))
-      )
-    `, [userId, date, date, date]);
-    
-    // Mark these payslips as needing recalculation
-    for (const payslip of affectedPayslips) {
-      await pool.execute(
-        'UPDATE payslips SET status = "needs_recalculation", last_updated = CURRENT_TIMESTAMP WHERE id = ?',
-        [payslip.id]
-      );
-    }
-    
-    return affectedPayslips.length;
-  } catch (error) {
-    console.error('Error invalidating payslips:', error);
-    return 0;
-  }
-}
 function getWeekStart(date) {
   const d = new Date(date);
   const day = d.getDay();
@@ -517,12 +341,7 @@ app.post('/api/overtime-request', authenticate, async (req, res) => {
       );
     }
 
-    res.json({ 
-      success: true, 
-      message: 'Time adjusted successfully',
-      affectedPayslips,
-      updatedProgress: true
-    });
+    res.json({ success: true });
   } catch (error) {
     console.error('Manual overtime request error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -804,158 +623,6 @@ app.get('/api/active-users', authenticate, async (req, res) => {
     res.json(activeUsers);
   } catch (error) {
     console.error('Error fetching active users:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// New endpoint to get real-time user dashboard data
-app.get('/api/user-dashboard-data', authenticate, async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    
-    // Get today's entry
-    const today = new Date().toISOString().split('T')[0];
-    const [todayEntry] = await pool.execute(
-      'SELECT * FROM user_daily_data WHERE user_id = ? AND date = ?',
-      [userId, today]
-    );
-    
-    // Get user progress
-    const [progressData] = await pool.execute(
-      'SELECT * FROM user_progress WHERE user_id = ?',
-      [userId]
-    );
-    
-    // Get user required hours
-    const [userData] = await pool.execute(
-      'SELECT required_hours FROM users WHERE id = ?',
-      [userId]
-    );
-    
-    // Get recent payslips
-    const [recentPayslips] = await pool.execute(`
-      SELECT * FROM payslips 
-      WHERE user_id = ? AND status = 'released'
-      ORDER BY week_start DESC 
-      LIMIT 5
-    `, [userId]);
-    
-    const requiredHours = parseFloat(userData[0]?.required_hours) || 0;
-    const workedHours = parseFloat(progressData[0]?.total_worked_hours) || 0;
-    
-    res.json({
-      todayEntry: todayEntry[0] || null,
-      progress: {
-        requiredHours,
-        workedHours,
-        remainingHours: Math.max(0, requiredHours - workedHours),
-        progressPercentage: requiredHours > 0 ? Math.min(100, (workedHours / requiredHours) * 100) : 0,
-        isCompleted: workedHours >= requiredHours,
-        totalOvertimeHours: parseFloat(progressData[0]?.total_overtime_hours) || 0,
-        totalDaysWorked: progressData[0]?.total_days_worked || 0,
-        totalLateInstances: progressData[0]?.total_late_instances || 0
-      },
-      recentPayslips,
-      lastUpdated: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Error fetching user dashboard data:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// New endpoint to get admin dashboard overview
-app.get('/api/admin-dashboard-overview', authenticate, async (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ message: 'Admin access required' });
-  }
-  
-  try {
-    // Get payslips that need recalculation
-    const [needsRecalc] = await pool.execute(
-      'SELECT COUNT(*) as count FROM payslips WHERE status = "needs_recalculation"'
-    );
-    
-    // Get today's active users
-    const today = new Date().toISOString().split('T')[0];
-    const [activeToday] = await pool.execute(
-      'SELECT COUNT(*) as count FROM user_daily_data WHERE date = ? AND status = "active"',
-      [today]
-    );
-    
-    // Get pending overtime requests
-    const [pendingOT] = await pool.execute(
-      'SELECT COUNT(*) as count FROM time_entries WHERE overtime_requested = TRUE AND overtime_approved IS NULL'
-    );
-    
-    // Get recent data sync issues
-    const [syncIssues] = await pool.execute(
-      'SELECT COUNT(*) as count FROM data_sync_log WHERE sync_status = "failed" AND created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)'
-    );
-    
-    res.json({
-      payslipsNeedingRecalculation: needsRecalc[0].count,
-      activeUsersToday: activeToday[0].count,
-      pendingOvertimeRequests: pendingOT[0].count,
-      recentSyncIssues: syncIssues[0].count,
-      lastUpdated: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Error fetching admin dashboard overview:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// New endpoint to recalculate payslips
-app.post('/api/recalculate-payslips', authenticate, async (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ message: 'Admin access required' });
-  }
-  
-  try {
-    // Get all payslips that need recalculation
-    const [payslipsToRecalc] = await pool.execute(
-      'SELECT * FROM payslips WHERE status = "needs_recalculation"'
-    );
-    
-    let recalculatedCount = 0;
-    
-    for (const payslip of payslipsToRecalc) {
-      // Recalculate the payslip based on current time entries
-      const newPayrollData = await calculatePayrollForDateRange(
-        payslip.user_id, 
-        payslip.week_start, 
-        payslip.week_end
-      );
-      
-      if (newPayrollData) {
-        await pool.execute(`
-          UPDATE payslips SET 
-          total_hours = ?, overtime_hours = ?, undertime_hours = ?,
-          base_salary = ?, overtime_pay = ?, undertime_deduction = ?,
-          staff_house_deduction = ?, total_salary = ?,
-          clock_in_time = ?, clock_out_time = ?,
-          status = 'pending', last_updated = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `, [
-          newPayrollData.totalHours, newPayrollData.overtimeHours, newPayrollData.undertimeHours,
-          newPayrollData.baseSalary, newPayrollData.overtimePay, newPayrollData.undertimeDeduction,
-          newPayrollData.staffHouseDeduction, newPayrollData.totalSalary,
-          newPayrollData.clockInTime, newPayrollData.clockOutTime,
-          payslip.id
-        ]);
-        
-        recalculatedCount++;
-      }
-    }
-    
-    res.json({
-      success: true,
-      recalculatedCount,
-      message: `Successfully recalculated ${recalculatedCount} payslips`
-    });
-  } catch (error) {
-    console.error('Error recalculating payslips:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
