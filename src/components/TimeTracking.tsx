@@ -525,7 +525,7 @@ export function TimeTracking() {
                   </div>
                 )}
 
-                {/* Today's Status */}
+                {/* Today's Activity */}
                 <div className={`${hoursProgress ? 'lg:col-span-2' : 'lg:col-span-3'}`}>
                   <div className="bg-gradient-to-br from-slate-800/90 to-slate-900/90 rounded-2xl p-6 border border-slate-700/50 backdrop-blur-sm h-full">
                     <div className="flex items-center gap-3 mb-6">
@@ -590,6 +590,56 @@ export function TimeTracking() {
                           {!todayEntry.clock_out && (
                             <p className="text-sm text-slate-400">Currently active • Updates in real-time</p>
                           )}
+                        </div>
+
+                        {/* Action Buttons Section */}
+                        <div className="bg-gradient-to-br from-slate-700/30 to-slate-800/30 p-6 rounded-xl border border-slate-600/50">
+                          <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                            <Clock className="w-5 h-5 text-emerald-400" />
+                            Quick Actions
+                          </h3>
+                          
+                          <div className="grid gap-4">
+                            {!todayEntry && (
+                              <button
+                                onClick={handleClockIn}
+                                disabled={isLoading}
+                                className="bg-gradient-to-r from-emerald-500 to-green-600 text-white py-4 px-6 rounded-xl font-semibold text-lg hover:from-emerald-600 hover:to-green-700 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-800 disabled:opacity-50 btn-enhanced flex items-center justify-center gap-3 shadow-lg transition-all duration-300 hover:shadow-xl hover:scale-105"
+                              >
+                                <Play className="w-5 h-5" />
+                                {isLoading ? 'Clocking In...' : 'Clock In'}
+                              </button>
+                            )}
+                            
+                            {todayEntry && todayEntry.clock_in && !todayEntry.clock_out && (
+                              <button
+                                onClick={handleClockOut}
+                                disabled={isLoading}
+                                className="bg-gradient-to-r from-red-500 to-red-600 text-white py-4 px-6 rounded-xl font-semibold text-lg hover:from-red-600 hover:to-red-700 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-slate-800 disabled:opacity-50 btn-enhanced flex items-center justify-center gap-3 shadow-lg transition-all duration-300 hover:shadow-xl hover:scale-105"
+                              >
+                                <Square className="w-5 h-5" />
+                                {isLoading ? 'Clocking Out...' : 'Clock Out'}
+                              </button>
+                            )}
+
+                            {todayEntry && todayEntry.clock_in && todayEntry.clock_out && (
+                              <button
+                                onClick={handleClockIn}
+                                className="bg-gradient-to-r from-blue-500 to-blue-600 text-white py-4 px-6 rounded-xl font-semibold text-lg hover:from-blue-600 hover:to-blue-700 btn-enhanced flex items-center justify-center gap-3 shadow-lg transition-all duration-300 hover:shadow-xl hover:scale-105"
+                              >
+                                <Play className="w-5 h-5" />
+                                Start New Session
+                              </button>
+                            )}
+                            
+                            <button
+                              onClick={() => setShowOvertimeModal(true)}
+                              className="bg-gradient-to-r from-orange-500 to-orange-600 text-white py-4 px-6 rounded-xl font-semibold text-lg hover:from-orange-600 hover:to-orange-700 focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-slate-800 btn-enhanced flex items-center justify-center gap-3 shadow-lg transition-all duration-300 hover:shadow-xl hover:scale-105"
+                            >
+                              <Clock className="w-5 h-5" />
+                              Request Overtime
+                            </button>
+                          </div>
                         </div>
 
                         {/* Late Clock In Warning */}
@@ -676,59 +726,45 @@ export function TimeTracking() {
                         )}
                       </div>
                     ) : (
-                      <div className="text-center py-12">
-                        <div className="bg-slate-700/30 p-6 rounded-full w-24 h-24 mx-auto mb-4 flex items-center justify-center">
-                          <Clock className="w-12 h-12 text-slate-500" />
+                      <div className="space-y-6">
+                        <div className="text-center py-12">
+                          <div className="bg-slate-700/30 p-6 rounded-full w-24 h-24 mx-auto mb-4 flex items-center justify-center">
+                            <Clock className="w-12 h-12 text-slate-500" />
+                          </div>
+                          <h3 className="text-lg font-medium text-white mb-2">Ready to Start Your Day?</h3>
+                          <p className="text-slate-400 mb-6">Clock in to begin tracking your time</p>
                         </div>
-                        <h3 className="text-lg font-medium text-white mb-2">Ready to Start Your Day?</h3>
-                        <p className="text-slate-400">Clock in to begin tracking your time</p>
+
+                        {/* Action Buttons for No Entry */}
+                        <div className="bg-gradient-to-br from-slate-700/30 to-slate-800/30 p-6 rounded-xl border border-slate-600/50">
+                          <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                            <Clock className="w-5 h-5 text-emerald-400" />
+                            Quick Actions
+                          </h3>
+                          
+                          <div className="grid gap-4">
+                            <button
+                              onClick={handleClockIn}
+                              disabled={isLoading}
+                              className="bg-gradient-to-r from-emerald-500 to-green-600 text-white py-4 px-6 rounded-xl font-semibold text-lg hover:from-emerald-600 hover:to-green-700 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-800 disabled:opacity-50 btn-enhanced flex items-center justify-center gap-3 shadow-lg transition-all duration-300 hover:shadow-xl hover:scale-105"
+                            >
+                              <Play className="w-5 h-5" />
+                              {isLoading ? 'Clocking In...' : 'Clock In'}
+                            </button>
+                            
+                            <button
+                              onClick={() => setShowOvertimeModal(true)}
+                              className="bg-gradient-to-r from-orange-500 to-orange-600 text-white py-4 px-6 rounded-xl font-semibold text-lg hover:from-orange-600 hover:to-orange-700 focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-slate-800 btn-enhanced flex items-center justify-center gap-3 shadow-lg transition-all duration-300 hover:shadow-xl hover:scale-105"
+                            >
+                              <Clock className="w-5 h-5" />
+                              Request Overtime
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
                 </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="grid md:grid-cols-3 gap-6">
-                {!todayEntry && (
-                  <button
-                    onClick={handleClockIn}
-                    disabled={isLoading}
-                    className="bg-gradient-to-r from-emerald-500 to-green-600 text-white py-6 px-8 rounded-2xl font-semibold text-lg hover:from-emerald-600 hover:to-green-700 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-800 disabled:opacity-50 btn-enhanced flex items-center justify-center gap-3 shadow-xl transition-all duration-300 hover:shadow-2xl hover:scale-105"
-                  >
-                    <Play className="w-6 h-6" />
-                    {isLoading ? 'Clocking In...' : 'Clock In'}
-                  </button>
-                )}
-                
-                {todayEntry && todayEntry.clock_in && !todayEntry.clock_out && (
-                  <button
-                    onClick={handleClockOut}
-                    disabled={isLoading}
-                    className="bg-gradient-to-r from-red-500 to-red-600 text-white py-6 px-8 rounded-2xl font-semibold text-lg hover:from-red-600 hover:to-red-700 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-slate-800 disabled:opacity-50 btn-enhanced flex items-center justify-center gap-3 shadow-xl transition-all duration-300 hover:shadow-2xl hover:scale-105"
-                  >
-                    <Square className="w-6 h-6" />
-                    {isLoading ? 'Clocking Out...' : 'Clock Out'}
-                  </button>
-                )}
-
-                {todayEntry && todayEntry.clock_in && todayEntry.clock_out && (
-                  <button
-                    onClick={handleClockIn}
-                    className="bg-gradient-to-r from-blue-500 to-blue-600 text-white py-6 px-8 rounded-2xl font-semibold text-lg hover:from-blue-600 hover:to-blue-700 btn-enhanced flex items-center justify-center gap-3 shadow-xl transition-all duration-300 hover:shadow-2xl hover:scale-105"
-                  >
-                    <Play className="w-6 h-6" />
-                    Start New Session
-                  </button>
-                )}
-                
-                <button
-                  onClick={() => setShowOvertimeModal(true)}
-                  className="bg-gradient-to-r from-orange-500 to-orange-600 text-white py-6 px-8 rounded-2xl font-semibold text-lg hover:from-orange-600 hover:to-orange-700 focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-slate-800 btn-enhanced flex items-center justify-center gap-3 shadow-xl transition-all duration-300 hover:shadow-2xl hover:scale-105"
-                >
-                  <Clock className="w-6 h-6" />
-                  Request Overtime
-                </button>
               </div>
 
               {/* Shift Information */}
