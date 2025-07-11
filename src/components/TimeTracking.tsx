@@ -371,23 +371,27 @@ export function TimeTracking() {
     <div className="max-w-7xl mx-auto p-6 space-y-6">
       {/* Header Section */}
       <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-3 bg-gradient-to-r from-emerald-500/10 to-green-600/10 backdrop-blur-sm rounded-2xl p-6 border border-emerald-500/20 mb-4">
-          <div className="bg-gradient-to-br from-emerald-400 to-green-500 p-3 rounded-xl shadow-lg">
-            <Clock className="w-8 h-8 text-white" />
-          </div>
-          <div className="text-left">
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">
-              Welcome back, {user?.username}!
-            </h1>
-            <p className="text-slate-400 text-lg">{formatCurrentDate()}</p>
-          </div>
-        </div>
-        
-        {/* Live Clock */}
-        <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-4 border border-slate-700/50 inline-block">
-          <div className="flex items-center gap-3">
-            <Timer className="w-5 h-5 text-emerald-400" />
-            <span className="text-2xl font-mono font-bold text-white">{formatCurrentTime()}</span>
+        <div className="bg-slate-800/90 backdrop-blur-sm rounded-2xl p-6 border border-slate-700/50 mb-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="bg-gradient-to-br from-emerald-400 to-green-500 p-3 rounded-xl shadow-lg">
+                <Clock className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-white">
+                  Welcome back, {user?.username}
+                </h1>
+                <p className="text-slate-400">{formatCurrentDate()}</p>
+              </div>
+            </div>
+            
+            {/* Live Clock */}
+            <div className="text-right">
+              <p className="text-sm text-slate-400 mb-1">Current Time</p>
+              <div className="text-xl font-mono font-bold text-emerald-400">
+                {formatCurrentTime()}
+              </div>
+            </div>
           </div>
         </div>
       </div>
