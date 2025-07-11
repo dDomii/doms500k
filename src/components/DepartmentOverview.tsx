@@ -185,7 +185,7 @@ export function DepartmentOverview() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-slate-400">Total Required Hours</p>
-              <p className="text-2xl font-bold text-emerald-400">{overallStats.totalRequiredHours.toFixed(0)}h</p>
+              <p className="text-2xl font-bold text-emerald-400">{Number(overallStats.totalRequiredHours).toFixed(0)}h</p>
             </div>
             <div className="bg-gradient-to-br from-emerald-500/20 to-green-600/20 p-3 rounded-lg border border-emerald-700/50">
               <Target className="w-6 h-6 text-emerald-400" />
@@ -197,7 +197,7 @@ export function DepartmentOverview() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-slate-400">Average Required</p>
-              <p className="text-2xl font-bold text-purple-400">{overallStats.avgRequiredHours.toFixed(1)}h</p>
+              <p className="text-2xl font-bold text-purple-400">{Number(overallStats.avgRequiredHours).toFixed(1)}h</p>
             </div>
             <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/20 p-3 rounded-lg border border-purple-700/50">
               <BarChart3 className="w-6 h-6 text-purple-400" />
@@ -238,7 +238,7 @@ export function DepartmentOverview() {
                   </div>
                   <div className="text-right">
                     <p className="text-sm text-slate-400">Total Required</p>
-                    <p className="text-lg font-bold text-emerald-400">{stat.totalRequiredHours.toFixed(0)}h</p>
+                    <p className="text-lg font-bold text-emerald-400">{Number(stat.totalRequiredHours).toFixed(0)}h</p>
                   </div>
                 </div>
                 
@@ -286,7 +286,7 @@ export function DepartmentOverview() {
                                   </div>
                                 ) : (
                                   <span className="text-sm font-medium text-emerald-400">
-                                    {user.required_hours.toFixed(1)}h
+                                    {Number(user.required_hours).toFixed(1)}h
                                   </span>
                                 )}
                               </div>
