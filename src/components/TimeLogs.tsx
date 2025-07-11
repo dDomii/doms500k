@@ -51,6 +51,13 @@ export function TimeLogs() {
     const currentWeekStart = getWeekStart(today);
     setSelectedWeek(currentWeekStart);
     fetchTimeLogs(currentWeekStart);
+    
+    // Set up auto-refresh for real-time updates
+    const refreshInterval = setInterval(() => {
+      fetchTimeLogs(selectedWeek);
+    }, 60000); // Refresh every minute
+    
+    return () => clearInterval(refreshInterval);
   }, []);
 
   const getWeekStart = (date: Date) => {

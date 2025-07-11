@@ -30,6 +30,24 @@ export async function clockIn(userId) {
       [userId, now, date, weekStart]
     );
 
+    // Calculate late minutes
+    const shiftStart = new Date(now);
+    shiftStart.setHours(7, 0, 0, 0);
+    const lateMinutes = now > shiftStart ? Math.floor((now - shiftStart) / (1000 * 60)) : 0;
+    
+    // Create/update daily data record
+    await pool.execute(`
+      INSERT INTO user_daily_data (user_id, date, clock_in, late_minutes, status)
+      VALUES (?, ?, ?, ?, 'active')
+      ON DUPLICATE KEY UPDATE
+      clock_in = VALUES(clock_in),
+      late_minutes = VALUES(late_minutes),
+      status = 'active',
+      updated_at = CURRENT_TIMESTAMP
+    `, [userId, date, now, lateMinutes]);
+    
+    // Update user progress
+    await updateUserProgressData(userId);
     return { success: true, entryId: result.insertId };
   } catch (error) {
     console.error('Clock in error:', error);
@@ -60,6 +78,30 @@ export async function clockOut(userId, overtimeNote = null) {
       [now, entry.id]
     );
 
+    // Calculate worked hours and overtime
+    const clockIn = new Date(entry.clock_in);
+    const totalHours = (now - clockIn) / (1000 * 60 * 60);
+    
+    // Check for overtime (after 4:00 PM)
+    const overtimeStart = new Date(clockIn);
+    overtimeStart.setHours(16, 0, 0, 0);
+    const overtimeHours = now > overtimeStart ? Math.max(0, (now - overtimeStart) / (1000 * 60 * 60)) : 0;
+    
+    // Update daily data
+    await pool.execute(`
+      UPDATE user_daily_data 
+      SET clock_out = ?, total_hours = ?, overtime_hours = ?, status = 'completed', updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = ? AND date = ?
+    `, [now, totalHours, overtimeHours, userId, date]);
+    
+    // Update user progress
+    await updateUserProgressData(userId);
+    
+    // Log the change
+    await pool.execute(`
+      INSERT INTO data_sync_log (user_id, action_type, affected_date, new_values)
+      VALUES (?, 'time_entry', ?, ?)
+    `, [userId, date, JSON.stringify({ action: 'clock_out', totalHours, overtimeHours })]);
     return { success: true };
   } catch (error) {
     console.error('Clock out error:', error);
@@ -67,6 +109,53 @@ export async function clockOut(userId, overtimeNote = null) {
   }
 }
 
+// Helper function to update user progress data
+async function updateUserProgressData(userId) {
+  try {
+    // Calculate total worked hours, overtime, days worked, etc.
+    const [progressData] = await pool.execute(`
+      SELECT 
+        COALESCE(SUM(total_hours), 0) as total_worked_hours,
+        COALESCE(SUM(overtime_hours), 0) as total_overtime_hours,
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) as total_days_worked,
+        COUNT(CASE WHEN late_minutes > 0 THEN 1 END) as total_late_instances,
+        MAX(clock_in) as last_clock_in,
+        MAX(clock_out) as last_clock_out
+      FROM user_daily_data 
+      WHERE user_id = ?
+    `, [userId]);
+    
+    const data = progressData[0];
+    
+    // Update or insert progress record
+    await pool.execute(`
+      INSERT INTO user_progress 
+      (user_id, total_worked_hours, total_overtime_hours, total_days_worked, total_late_instances, last_clock_in, last_clock_out)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+      total_worked_hours = VALUES(total_worked_hours),
+      total_overtime_hours = VALUES(total_overtime_hours),
+      total_days_worked = VALUES(total_days_worked),
+      total_late_instances = VALUES(total_late_instances),
+      last_clock_in = VALUES(last_clock_in),
+      last_clock_out = VALUES(last_clock_out),
+      last_updated = CURRENT_TIMESTAMP
+    `, [
+      userId,
+      data.total_worked_hours,
+      data.total_overtime_hours,
+      data.total_days_worked,
+      data.total_late_instances,
+      data.last_clock_in,
+      data.last_clock_out
+    ]);
+    
+    return true;
+  } catch (error) {
+    console.error('Error updating user progress:', error);
+    return false;
+  }
+}
 export async function getTodayEntry(userId) {
   try {
     const today = new Date().toISOString().split('T')[0];

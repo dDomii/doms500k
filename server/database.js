@@ -77,9 +77,69 @@ export async function initializeDatabase() {
         total_salary DECIMAL(10,2) NOT NULL,
         clock_in_time TIMESTAMP NULL,
         clock_out_time TIMESTAMP NULL,
-        status ENUM('pending', 'released') DEFAULT 'pending',
+        status ENUM('pending', 'released', 'needs_recalculation') DEFAULT 'pending',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id)
+      )
+    `);
+
+    // User daily data table for comprehensive tracking
+    await pool.execute(`
+      CREATE TABLE IF NOT EXISTS user_daily_data (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        date DATE NOT NULL,
+        clock_in TIMESTAMP NULL,
+        clock_out TIMESTAMP NULL,
+        total_hours DECIMAL(5,2) DEFAULT 0,
+        overtime_hours DECIMAL(5,2) DEFAULT 0,
+        undertime_hours DECIMAL(5,2) DEFAULT 0,
+        late_minutes INT DEFAULT 0,
+        overtime_requested BOOLEAN DEFAULT FALSE,
+        overtime_approved BOOLEAN DEFAULT NULL,
+        overtime_note TEXT NULL,
+        break_duration INT DEFAULT 30,
+        status ENUM('active', 'completed', 'absent') DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_user_date (user_id, date),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      )
+    `);
+
+    // User progress tracking table
+    await pool.execute(`
+      CREATE TABLE IF NOT EXISTS user_progress (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL UNIQUE,
+        total_worked_hours DECIMAL(8,2) DEFAULT 0,
+        total_overtime_hours DECIMAL(8,2) DEFAULT 0,
+        total_days_worked INT DEFAULT 0,
+        total_late_instances INT DEFAULT 0,
+        last_clock_in TIMESTAMP NULL,
+        last_clock_out TIMESTAMP NULL,
+        current_streak INT DEFAULT 0,
+        best_streak INT DEFAULT 0,
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      )
+    `);
+
+    // Data sync log table to track changes
+    await pool.execute(`
+      CREATE TABLE IF NOT EXISTS data_sync_log (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        action_type ENUM('time_entry', 'payslip_update', 'progress_update', 'admin_adjustment') NOT NULL,
+        affected_date DATE NOT NULL,
+        old_values JSON NULL,
+        new_values JSON NULL,
+        triggered_by INT NULL,
+        sync_status ENUM('pending', 'completed', 'failed') DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (triggered_by) REFERENCES users(id)
       )
     `);
 
