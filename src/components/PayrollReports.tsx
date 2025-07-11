@@ -285,7 +285,15 @@ export function PayrollReports() {
     if (clockOutTime <= clockInTime) return null;
     
     // Calculate total worked hours
-    const totalWorkedHours = (clockOutTime.getTime() - clockInTime.getTime()) / (1000 * 60 * 60);
+    let totalWorkedHours = 0;
+
+    const clockInDate = new Date(clockIn);
+    const newClockInHour = clockInDate.getHours();
+
+    if (newClockInHour < 7) {
+      clockInDate.setHours(7, 0, 0, 0);
+      totalWorkedHours = (clockOutTime.getTime() - clockInDate.getTime()) / (1000 * 60 * 60);
+    }
     
     // Check for late clock in (after 7:00 AM)
     const shiftStart = new Date(clockInTime);
@@ -294,11 +302,12 @@ export function PayrollReports() {
     
     // Check for overtime (after 3:30 PM with 30-minute grace period = 4:00 PM)
     const shiftEnd = new Date(clockInTime);
-    shiftEnd.setHours(16, 0, 0, 0); // 4:00 PM (with grace period)
+    shiftEnd.setHours(15, 30, 0, 0); // 4:00 PM (with grace period)
     const overtimeHours = clockOutTime > shiftEnd ? (clockOutTime.getTime() - shiftEnd.getTime()) / (1000 * 60 * 60) : 0;
     
     // Calculate pay components
     const baseSalary = totalWorkedHours * 23.52941176470588; // ₱23.52941176470588/hour breaktime included
+
     const overtimePay = overtimeHours * 35; // ₱35/hour for overtime
     const undertimeDeduction = lateHours * 25; // ₱25/hour deduction for late
     const staffHouseDeduction = isStaffHouse ? 50 : 0; // ₱50/day for staff house (prorated)
@@ -1100,8 +1109,7 @@ export function PayrollReports() {
                                     className="w-24 text-xs px-2 py-1 bg-slate-700/50 border border-slate-600 rounded text-right text-white focus:ring-2 focus:ring-emerald-500"
                                     readOnly={isCalculating}
                                   />
-                                ) : (
-                                  formatCurrency(parseFloat(entry.base_salary) || 0)
+                                ) : (formatCurrency(parseFloat(entry.base_salary) || 0)
                                 )}
                               </td>
                               <td className="py-3 px-4 text-right text-emerald-400">
