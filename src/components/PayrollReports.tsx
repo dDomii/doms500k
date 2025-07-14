@@ -462,12 +462,17 @@ export function PayrollReports() {
   );
 
   // Filter payroll data based on search and department
-  const filteredPayrollData = payrollData.filter(entry => {
+  if (payrollData && typeof payrollData === 'object') {
+  const payrollArray = Object.values(payrollData);
+  const filteredPayrollData = payrollArray.filter(entry => {
     const matchesSearch = entry.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         entry.department.toLowerCase().includes(searchTerm.toLowerCase());
+                          entry.department.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesDepartment = departmentFilter === '' || entry.department === departmentFilter;
     return matchesSearch && matchesDepartment;
   });
+} else {
+  console.error('payrollData is not an object:', payrollData);
+}
 
   const totalSalary = filteredPayrollData.reduce((sum, entry) => sum + entry.total_salary, 0);
   const totalHours = filteredPayrollData.reduce((sum, entry) => sum + entry.total_hours, 0);
