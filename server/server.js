@@ -444,8 +444,6 @@ app.get('/api/payroll-report', authenticate, async (req, res) => {
     report = await getPayrollReport(sortedDates[0], sortedDates[sortedDates.length - 1]);
   } else if (startDate && endDate) {
     report = await getPayrollReport(startDate, endDate);
-    startDate = toMySQLDate(startDate);
-if (endDate) endDate = toMySQLDate(endDate);
   } else if (weekStart) {
     report = await getPayrollReport(weekStart);
   } else {
@@ -566,10 +564,8 @@ app.post('/api/payslips/release', authenticate, async (req, res) => {
 // Helper function to log payslip actions
 async function logPayslipAction(adminId, action, dates, payslipCount, userIds = null) {
   try {
-    const formatDate = (isoString) => new Date(isoString).toISOString().split('T')[0];
-
-const periodStart = formatDate(dates[0]);
-const periodEnd = formatDate(dates[dates.length - 1] || dates[0]);
+    const periodStart = dates[0];
+    const periodEnd = dates[dates.length - 1] || dates[0];
     const userIdsJson = userIds ? JSON.stringify(userIds) : null;
     
     await pool.execute(
