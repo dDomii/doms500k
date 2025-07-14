@@ -37,10 +37,12 @@ const DEPARTMENTS = [
 
 export function PayrollReports() {
   const [payrollData, setPayrollData] = useState<PayrollEntry[]>([]);
+  const [selectedWeek, setSelectedWeek] = useState('');
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
   const [selectedUsers, setSelectedUsers] = useState<number[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [generationMode, setGenerationMode] = useState<'week' | 'dates'>('week');
   const [editingEntry, setEditingEntry] = useState<PayrollEntry | null>(null);
   const [editForm, setEditForm] = useState({
     clockIn: '',
@@ -58,13 +60,64 @@ export function PayrollReports() {
   const [deletingEntry, setDeletingEntry] = useState<PayrollEntry | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('');
-  const [showPreview, setShowPreview] = useState(false);
-  const [previewData, setPreviewData] = useState<PayrollEntry[]>([]);
   const { token } = useAuth();
 
   useEffect(() => {
     fetchUsers();
+    // Set current week as default
+    const today = new Date();
+    const currentWeekStart = getWeekStart(today);
+    setSelectedWeek(currentWeekStart);
   }, []);
+
+  const getWeekStart = (date: Date) => {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = d.getDate() - day;
+    return new Date(d.setDate(diff)).toISOString().split('T')[0];
+  };
+
+  const getWeekEnd = (weekStart: string) => {
+    const start = new Date(weekStart);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return end.toISOString().split('T')[0];
+  };
+
+  const generateWeekOptions = () => {
+    const weeks = [];
+    const today = new Date();
+    
+    // Generate last 12 weeks
+    for (let i = 0; i < 12; i++) {
+      const weekDate = new Date(today);
+      weekDate.setDate(today.getDate() - (i * 7));
+      const weekStart = getWeekStart(weekDate);
+      const weekEnd = getWeekEnd(weekStart);
+      
+      weeks.push({
+        value: weekStart,
+        label: `${formatDate(weekStart)} - ${formatDate(weekEnd)}`,
+        isCurrent: i === 0
+      });
+    }
+    
+    return weeks;
+  };
+
+  const generateDateOptions = () => {
+    const dates = [];
+    const today = new Date();
+    
+    // Generate last 30 days
+    for (let i = 0; i < 30; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() - i);
+      dates.push(date.toISOString().split('T')[0]);
+    }
+    
+    return dates;
+  };
 
   const fetchUsers = async () => {
     try {
@@ -79,23 +132,37 @@ export function PayrollReports() {
   };
 
   const generatePayslips = async () => {
-    if (selectedDates.length === 0) {
+    if (generationMode === 'week' && !selectedWeek) {
+      alert('Please select a week');
+      return;
+    }
+    
+    if (generationMode === 'dates' && selectedDates.length === 0) {
       alert('Please select at least one date');
       return;
     }
 
     setLoading(true);
     try {
+      let requestBody: any = {};
+      
+      if (generationMode === 'week') {
+        requestBody.weekStart = selectedWeek;
+      } else {
+        requestBody.selectedDates = selectedDates;
+      }
+      
+      if (selectedUsers.length > 0) {
+        requestBody.userIds = selectedUsers;
+      }
+
       const response = await fetch('http://192.168.100.60:3001/api/payslips/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          selectedDates,
-          userIds: selectedUsers.length > 0 ? selectedUsers : null
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const data = await response.json();
@@ -103,7 +170,7 @@ export function PayrollReports() {
         alert(`Generated ${data.length} payslips successfully!`);
         fetchPayrollReport();
       } else {
-        alert('No payslips were generated. Check if users have time entries for the selected dates.');
+        alert('No payslips were generated. Check if users have time entries for the selected period.');
       }
     } catch (error) {
       console.error('Error generating payslips:', error);
@@ -113,17 +180,23 @@ export function PayrollReports() {
   };
 
   const fetchPayrollReport = async () => {
-    if (selectedDates.length === 0) return;
+    if (generationMode === 'week' && !selectedWeek) return;
+    if (generationMode === 'dates' && selectedDates.length === 0) return;
 
     setLoading(true);
     try {
-      const datesParam = selectedDates.join(',');
-      const response = await fetch(
-        `http://192.168.100.60:3001/api/payroll-report?selectedDates=${datesParam}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      let url = 'http://192.168.100.60:3001/api/payroll-report';
+      
+      if (generationMode === 'week') {
+        url += `?weekStart=${selectedWeek}`;
+      } else {
+        const datesParam = selectedDates.join(',');
+        url += `?selectedDates=${datesParam}`;
+      }
+      
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const data = await response.json();
       setPayrollData(data);
     } catch (error) {
@@ -133,29 +206,43 @@ export function PayrollReports() {
   };
 
   const releasePayslips = async () => {
-    if (selectedDates.length === 0) {
+    if (generationMode === 'week' && !selectedWeek) {
+      alert('Please select a week first');
+      return;
+    }
+    
+    if (generationMode === 'dates' && selectedDates.length === 0) {
       alert('Please select dates first');
       return;
     }
 
     const confirmed = window.confirm(
-      `Are you sure you want to release payslips for the selected dates? This will make them visible to employees.`
+      `Are you sure you want to release payslips for the selected ${generationMode === 'week' ? 'week' : 'dates'}? This will make them visible to employees.`
     );
 
     if (!confirmed) return;
 
     setLoading(true);
     try {
+      let requestBody: any = {};
+      
+      if (generationMode === 'week') {
+        requestBody.selectedDates = [selectedWeek, getWeekEnd(selectedWeek)];
+      } else {
+        requestBody.selectedDates = selectedDates;
+      }
+      
+      if (selectedUsers.length > 0) {
+        requestBody.userIds = selectedUsers;
+      }
+
       const response = await fetch('http://192.168.100.60:3001/api/payslips/release', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          selectedDates,
-          userIds: selectedUsers.length > 0 ? selectedUsers : null
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const data = await response.json();
@@ -307,9 +394,14 @@ export function PayrollReports() {
     
     // Date range
     doc.setFontSize(12);
-    const dateRange = selectedDates.length > 1 
-      ? `${selectedDates[0]} to ${selectedDates[selectedDates.length - 1]}`
-      : selectedDates[0];
+    let dateRange = '';
+    if (generationMode === 'week') {
+      dateRange = `Week: ${formatDate(selectedWeek)} - ${formatDate(getWeekEnd(selectedWeek))}`;
+    } else {
+      dateRange = selectedDates.length > 1 
+        ? `${selectedDates[0]} to ${selectedDates[selectedDates.length - 1]}`
+        : selectedDates[0];
+    }
     doc.text(`Period: ${dateRange}`, pageWidth / 2, 30, { align: 'center' });
     
     // Table data
@@ -379,25 +471,20 @@ export function PayrollReports() {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    const dateRange = selectedDates.length > 1 
-      ? `${selectedDates[0]}_to_${selectedDates[selectedDates.length - 1]}`
-      : selectedDates[0];
-    link.download = `payroll_report_${dateRange}.csv`;
-    link.click();
-  };
-
-  const generateDateOptions = () => {
-    const dates = [];
-    const today = new Date();
     
-    // Generate last 30 days
-    for (let i = 0; i < 30; i++) {
-      const date = new Date(today);
-      date.setDate(today.getDate() - i);
-      dates.push(date.toISOString().split('T')[0]);
+    let filename = 'payroll_report_';
+    if (generationMode === 'week') {
+      filename += `week_${selectedWeek}`;
+    } else {
+      const dateRange = selectedDates.length > 1 
+        ? `${selectedDates[0]}_to_${selectedDates[selectedDates.length - 1]}`
+        : selectedDates[0];
+      filename += dateRange;
     }
+    filename += '.csv';
     
-    return dates;
+    link.download = filename;
+    link.click();
   };
 
   const handleDateToggle = (date: string) => {
@@ -420,6 +507,14 @@ export function PayrollReports() {
     });
   };
 
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
   const filteredPayrollData = payrollData.filter(entry => {
     const matchesSearch = entry.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          entry.department.toLowerCase().includes(searchTerm.toLowerCase());
@@ -431,6 +526,7 @@ export function PayrollReports() {
   const totalHours = filteredPayrollData.reduce((sum, entry) => sum + entry.total_hours, 0);
   const totalOvertimeHours = filteredPayrollData.reduce((sum, entry) => sum + entry.overtime_hours, 0);
 
+  const weekOptions = generateWeekOptions();
   const dateOptions = generateDateOptions();
 
   return (
@@ -442,37 +538,81 @@ export function PayrollReports() {
         </div>
       </div>
 
-      {/* Date and User Selection */}
+      {/* Generation Mode Selection */}
       <div className="bg-slate-800/90 backdrop-blur-sm rounded-xl p-6 mb-6 shadow-lg border border-slate-700/50">
-        <h3 className="text-lg font-semibold text-white mb-4">Select Dates and Users</h3>
+        <h3 className="text-lg font-semibold text-white mb-4">Payroll Generation Mode</h3>
         
+        <div className="flex gap-4 mb-6">
+          <label className="flex items-center space-x-3 cursor-pointer">
+            <input
+              type="radio"
+              value="week"
+              checked={generationMode === 'week'}
+              onChange={(e) => setGenerationMode(e.target.value as 'week' | 'dates')}
+              className="text-emerald-600 focus:ring-emerald-500"
+            />
+            <span className="text-slate-300 font-medium">Weekly Payroll</span>
+          </label>
+          <label className="flex items-center space-x-3 cursor-pointer">
+            <input
+              type="radio"
+              value="dates"
+              checked={generationMode === 'dates'}
+              onChange={(e) => setGenerationMode(e.target.value as 'week' | 'dates')}
+              className="text-emerald-600 focus:ring-emerald-500"
+            />
+            <span className="text-slate-300 font-medium">Specific Dates</span>
+          </label>
+        </div>
+
         <div className="grid lg:grid-cols-2 gap-6">
-          {/* Date Selection */}
+          {/* Week/Date Selection */}
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-3">
-              Select Dates ({selectedDates.length} selected)
-            </label>
-            <div className="bg-slate-700/30 rounded-lg p-4 max-h-60 overflow-y-auto border border-slate-600/50">
-              <div className="grid grid-cols-2 gap-2">
-                {dateOptions.map(date => (
-                  <label key={date} className="flex items-center space-x-2 p-2 hover:bg-slate-600/30 rounded cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={selectedDates.includes(date)}
-                      onChange={() => handleDateToggle(date)}
-                      className="rounded border-slate-600 text-emerald-600 focus:ring-emerald-500 bg-slate-700/50"
-                    />
-                    <span className="text-sm text-slate-300">
-                      {new Date(date).toLocaleDateString('en-US', { 
-                        weekday: 'short', 
-                        month: 'short', 
-                        day: 'numeric' 
-                      })}
-                    </span>
-                  </label>
-                ))}
+            {generationMode === 'week' ? (
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-3">
+                  Select Week
+                </label>
+                <select
+                  value={selectedWeek}
+                  onChange={(e) => setSelectedWeek(e.target.value)}
+                  className="w-full p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white"
+                >
+                  {weekOptions.map(week => (
+                    <option key={week.value} value={week.value}>
+                      {week.label} {week.isCurrent ? '(Current Week)' : ''}
+                    </option>
+                  ))}
+                </select>
               </div>
-            </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-3">
+                  Select Dates ({selectedDates.length} selected)
+                </label>
+                <div className="bg-slate-700/30 rounded-lg p-4 max-h-60 overflow-y-auto border border-slate-600/50">
+                  <div className="grid grid-cols-2 gap-2">
+                    {dateOptions.map(date => (
+                      <label key={date} className="flex items-center space-x-2 p-2 hover:bg-slate-600/30 rounded cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedDates.includes(date)}
+                          onChange={() => handleDateToggle(date)}
+                          className="rounded border-slate-600 text-emerald-600 focus:ring-emerald-500 bg-slate-700/50"
+                        />
+                        <span className="text-sm text-slate-300">
+                          {new Date(date).toLocaleDateString('en-US', { 
+                            weekday: 'short', 
+                            month: 'short', 
+                            day: 'numeric' 
+                          })}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* User Selection */}
@@ -512,7 +652,7 @@ export function PayrollReports() {
         <div className="flex gap-4 mt-6">
           <button
             onClick={generatePayslips}
-            disabled={loading || selectedDates.length === 0}
+            disabled={loading || (generationMode === 'week' && !selectedWeek) || (generationMode === 'dates' && selectedDates.length === 0)}
             className="bg-gradient-to-r from-emerald-500 to-green-600 text-white px-6 py-3 rounded-lg font-medium hover:from-emerald-600 hover:to-green-700 disabled:opacity-50 btn-enhanced flex items-center gap-2 shadow-lg"
           >
             <FileText className="w-4 h-4" />
@@ -521,7 +661,7 @@ export function PayrollReports() {
           
           <button
             onClick={fetchPayrollReport}
-            disabled={loading || selectedDates.length === 0}
+            disabled={loading || (generationMode === 'week' && !selectedWeek) || (generationMode === 'dates' && selectedDates.length === 0)}
             className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:from-blue-600 hover:to-blue-700 disabled:opacity-50 btn-enhanced flex items-center gap-2 shadow-lg"
           >
             <Eye className="w-4 h-4" />
@@ -530,7 +670,7 @@ export function PayrollReports() {
           
           <button
             onClick={releasePayslips}
-            disabled={loading || selectedDates.length === 0}
+            disabled={loading || (generationMode === 'week' && !selectedWeek) || (generationMode === 'dates' && selectedDates.length === 0)}
             className="bg-gradient-to-r from-orange-500 to-orange-600 text-white px-6 py-3 rounded-lg font-medium hover:from-orange-600 hover:to-orange-700 disabled:opacity-50 btn-enhanced flex items-center gap-2 shadow-lg"
           >
             <CheckCircle className="w-4 h-4" />
@@ -659,9 +799,11 @@ export function PayrollReports() {
         <div className="bg-slate-800/90 backdrop-blur-sm rounded-xl shadow-lg overflow-hidden border border-slate-700/50">
           <div className="bg-slate-700/50 px-6 py-4 border-b border-slate-600/50">
             <h3 className="text-lg font-semibold text-white">
-              Payroll Report - {selectedDates.length > 1 
-                ? `${selectedDates[0]} to ${selectedDates[selectedDates.length - 1]}`
-                : selectedDates[0]
+              Payroll Report - {generationMode === 'week' 
+                ? `Week: ${formatDate(selectedWeek)} - ${formatDate(getWeekEnd(selectedWeek))}`
+                : selectedDates.length > 1 
+                  ? `${selectedDates[0]} to ${selectedDates[selectedDates.length - 1]}`
+                  : selectedDates[0]
               }
             </h3>
             <p className="text-sm text-slate-400 mt-1">
@@ -765,14 +907,14 @@ export function PayrollReports() {
             </table>
           </div>
         </div>
-      ) : selectedDates.length > 0 ? (
+      ) : (generationMode === 'week' && selectedWeek) || (generationMode === 'dates' && selectedDates.length > 0) ? (
         <div className="text-center py-12">
           <div className="bg-slate-700/30 p-4 rounded-full w-20 h-20 mx-auto mb-4 flex items-center justify-center">
             <FileText className="w-10 h-10 text-slate-500" />
           </div>
           <h3 className="text-lg font-medium text-white mb-2">No Payroll Data</h3>
           <p className="text-slate-400">
-            No payroll records found for the selected dates. Generate payslips first.
+            No payroll records found for the selected {generationMode === 'week' ? 'week' : 'dates'}. Generate payslips first.
           </p>
         </div>
       ) : (
@@ -780,9 +922,9 @@ export function PayrollReports() {
           <div className="bg-slate-700/30 p-4 rounded-full w-20 h-20 mx-auto mb-4 flex items-center justify-center">
             <Calendar className="w-10 h-10 text-slate-500" />
           </div>
-          <h3 className="text-lg font-medium text-white mb-2">Select Dates</h3>
+          <h3 className="text-lg font-medium text-white mb-2">Select Period</h3>
           <p className="text-slate-400">
-            Please select dates above to generate or view payroll reports.
+            Please select a {generationMode === 'week' ? 'week' : 'dates'} above to generate or view payroll reports.
           </p>
         </div>
       )}
