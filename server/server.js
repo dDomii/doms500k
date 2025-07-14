@@ -444,6 +444,8 @@ app.get('/api/payroll-report', authenticate, async (req, res) => {
     report = await getPayrollReport(sortedDates[0], sortedDates[sortedDates.length - 1]);
   } else if (startDate && endDate) {
     report = await getPayrollReport(startDate, endDate);
+    startDate = toMySQLDate(startDate);
+if (endDate) endDate = toMySQLDate(endDate);
   } else if (weekStart) {
     report = await getPayrollReport(weekStart);
   } else {
