@@ -752,7 +752,7 @@ export function PayrollReports() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-slate-400">Total Hours</p>
-                <p className="text-2xl font-bold text-blue-400">{totalHours.toFixed(1)}h</p>
+                <p className="text-2xl font-bold text-blue-400">{Number(totalHours).toFixed(1)}h</p>
               </div>
               <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/20 p-3 rounded-lg">
                 <Clock className="w-6 h-6 text-blue-400" />
@@ -764,7 +764,7 @@ export function PayrollReports() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-slate-400">Overtime Hours</p>
-                <p className="text-2xl font-bold text-orange-400">{totalOvertimeHours.toFixed(1)}h</p>
+                <p className="text-2xl font-bold text-orange-400">{Number(totalOvertimeHours).toFixed(1)}h</p>
               </div>
               <div className="bg-gradient-to-br from-orange-500/20 to-orange-600/20 p-3 rounded-lg">
                 <Clock className="w-6 h-6 text-orange-400" />
@@ -850,18 +850,18 @@ export function PayrollReports() {
                     </td>
                     <td className="py-3 px-4 text-right">
                       <div>
-                        <p className="text-white">{entry.total_hours.toFixed(2)}h</p>
+                        <p className="text-white">{Number(entry.total_hours).toFixed(2)}h</p>
                         {entry.overtime_hours > 0 && (
-                          <p className="text-sm text-orange-400">+{entry.overtime_hours.toFixed(2)}h OT</p>
+                          <p className="text-sm text-orange-400">+{Number(entry.overtime_hours).toFixed(2)}h OT</p>
                         )}
                         {entry.undertime_hours > 0 && (
-                          <p className="text-sm text-red-400">-{entry.undertime_hours.toFixed(2)}h late</p>
+                          <p className="text-sm text-red-400">-{Number(entry.undertime_hours).toFixed(2)}h late</p>
                         )}
                       </div>
                     </td>
-                    <td className="py-3 px-4 text-right text-white">₱{entry.base_salary.toFixed(2)}</td>
+                    <td className="py-3 px-4 text-right text-white">₱{Number(entry.base_salary).toFixed(2)}</td>
                     <td className="py-3 px-4 text-right text-emerald-400">
-                      {entry.overtime_pay > 0 ? `₱${entry.overtime_pay.toFixed(2)}` : '-'}
+                      {entry.overtime_pay > 0 ? `₱${Number(entry.overtime_pay).toFixed(2)}` : '-'}
                     </td>
                     <td className="py-3 px-4 text-right text-red-400">
                       {(entry.undertime_deduction + entry.staff_house_deduction) > 0 
@@ -869,7 +869,7 @@ export function PayrollReports() {
                         : '-'}
                     </td>
                     <td className="py-3 px-4 text-right">
-                      <p className="font-bold text-white">₱{entry.total_salary.toFixed(2)}</p>
+                      <p className="font-bold text-white">₱{Number(entry.total_salary).toFixed(2)}</p>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${
