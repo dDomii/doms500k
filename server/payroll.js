@@ -194,48 +194,47 @@ export async function generatePayslipsForDateRange(startDate, endDate) {
 
 export async function generatePayslipsForSpecificDays(selectedDates, userIds = null) {
   try {
-    const payslips = [];
+    // Build date conditions for specific days
+    const dateConditions = selectedDates.map(() => 'DATE(te.clock_in) = ?').join(' OR ');
     
-    // Process each date separately to ensure individual payslips
-    for (const date of selectedDates) {
-      // Build date conditions for specific days
-      let userCondition = '';
-      let queryParams = [date];
-      
-      if (userIds && userIds.length > 0) {
-        userCondition = ` AND u.id IN (${userIds.map(() => '?').join(',')})`;
-        queryParams.push(...userIds);
-      }
+    let userCondition = '';
+    let queryParams = [...selectedDates];
+    
+    if (userIds && userIds.length > 0) {
+      userCondition = ` AND u.id IN (${userIds.map(() => '?').join(',')})`;
+      queryParams.push(...userIds);
+    }
 
-      // Get all time entries for this specific date
-      const [timeEntries] = await pool.execute(`
-        SELECT te.*, u.username, u.department, u.staff_house
-        FROM time_entries te
-        JOIN users u ON te.user_id = u.id
-        WHERE u.active = TRUE AND DATE(te.clock_in) = ? AND te.clock_out IS NOT NULL${userCondition}
-        ORDER BY u.id
-      `, queryParams);
+    // Get all users who have time entries on the selected dates
+    const [users] = await pool.execute(`
+      SELECT DISTINCT u.* FROM users u 
+      JOIN time_entries te ON u.id = te.user_id
+      WHERE u.active = TRUE AND (${dateConditions})${userCondition}
+      GROUP BY u.id
+    `, queryParams);
 
-      for (const entry of timeEntries) {
-        // Check if payslip already exists for this user and specific date
+    const payslips = [];
+
+    for (const user of users) {
+      // Calculate payroll for the specific selected days
+      const payroll = await calculatePayrollForSpecificDays(user.id, selectedDates);
+      if (payroll && payroll.totalHours > 0) {
+        // Create a unique identifier for this payslip based on selected dates
+        const dateRange = `${selectedDates[0]}_to_${selectedDates[selectedDates.length - 1]}`;
+        
+        // Check if payslip already exists for this user and date combination
         const [existing] = await pool.execute(
           'SELECT id FROM payslips WHERE user_id = ? AND week_start = ? AND week_end = ?',
-          [entry.user_id, date, date]
+          [user.id, selectedDates[0], selectedDates[selectedDates.length - 1]]
         );
 
-        if (existing.length > 0) {
-          continue; // Skip if payslip already exists for this day
-        }
-
-        // Calculate payroll for this specific entry
-        const payroll = await calculatePayrollForSingleEntry(entry);
-        if (payroll && payroll.totalHours > 0) {
+        if (existing.length === 0) {
           const [result] = await pool.execute(
             `INSERT INTO payslips (user_id, week_start, week_end, total_hours, overtime_hours, 
              undertime_hours, base_salary, overtime_pay, undertime_deduction, staff_house_deduction, 
              total_salary, clock_in_time, clock_out_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-              entry.user_id, date, date,
+              user.id, selectedDates[0], selectedDates[selectedDates.length - 1],
               payroll.totalHours, payroll.overtimeHours, payroll.undertimeHours,
               payroll.baseSalary, payroll.overtimePay, payroll.undertimeDeduction,
               payroll.staffHouseDeduction, payroll.totalSalary,
@@ -245,9 +244,9 @@ export async function generatePayslipsForSpecificDays(selectedDates, userIds = n
 
           payslips.push({
             id: result.insertId,
-            user: entry.username,
-            department: entry.department,
-            date: date,
+            user: user.username,
+            department: user.department,
+            selectedDates: selectedDates,
             ...payroll
           });
         }
@@ -258,6 +257,80 @@ export async function generatePayslipsForSpecificDays(selectedDates, userIds = n
   } catch (error) {
     console.error('Generate payslips for specific days error:', error);
     return [];
+  }
+}
+
+// New function to calculate payroll for a single time entry
+export async function calculatePayrollForSingleEntry(entry) {
+  try {
+    const standardHoursPerDay = 8.5; // Always 8.5 hours for ₱200 base pay
+    const maxBasePay = 200; // Cap base pay at ₱200
+    const hourlyRate = 200 / 8.5; // ₱23.53 per hour
+    
+    const clockIn = new Date(entry.clock_in);
+    const clockOut = new Date(entry.clock_out);
+
+    // Define shift start time (7:00 AM)
+    const shiftStart = new Date(clockIn);
+    shiftStart.setHours(7, 0, 0, 0);
+    
+    // Define shift end time (3:30 PM)
+    const shiftEnd = new Date(clockIn);
+    shiftEnd.setHours(15, 30, 0, 0);
+    
+    // Work hours only count from 7:00 AM onwards
+    const effectiveClockIn = clockIn < shiftStart ? shiftStart : clockIn;
+    
+    // Calculate worked hours from 7:00 AM onwards only
+    let workedHours = Math.max(0, (clockOut.getTime() - effectiveClockIn.getTime()) / (1000 * 60 * 60));
+    
+    // Only count positive worked hours
+    if (workedHours <= 0) {
+      return null; // Skip if no valid work time
+    }
+    
+    let undertimeHours = 0;
+    let overtimeHours = 0;
+    
+    // Check for late clock in (after 7:00 AM)
+    if (clockIn > shiftStart) {
+      undertimeHours = (clockIn.getTime() - shiftStart.getTime()) / (1000 * 60 * 60);
+    }
+
+    // Handle overtime calculation - only if requested and approved
+    if (entry.overtime_requested && entry.overtime_approved) {
+      if (clockOut > shiftEnd) {
+        // Overtime starts immediately at 3:30 PM when approved
+        overtimeHours = Math.max(0, (clockOut.getTime() - shiftEnd.getTime()) / (1000 * 60 * 60));
+      }
+    }
+    
+    // Calculate base salary (capped at ₱200 for 8.5 hours)
+    const dailyBaseHours = Math.min(workedHours, standardHoursPerDay);
+    const baseSalary = Math.min(dailyBaseHours * hourlyRate, maxBasePay);
+    const overtimePay = overtimeHours * 35;
+    const undertimeDeduction = undertimeHours * hourlyRate;
+    
+    // Daily staff house deduction (₱50 per day if enrolled)
+    const staffHouseDeduction = entry.staff_house ? 50 : 0;
+    
+    const totalSalary = baseSalary + overtimePay - undertimeDeduction - staffHouseDeduction;
+
+    return {
+      totalHours: dailyBaseHours,
+      overtimeHours,
+      undertimeHours,
+      baseSalary,
+      overtimePay,
+      undertimeDeduction,
+      staffHouseDeduction,
+      totalSalary,
+      clockInTime: formatDateTimeForMySQL(clockIn),
+      clockOutTime: formatDateTimeForMySQL(clockOut)
+    };
+  } catch (error) {
+    console.error('Calculate payroll for single entry error:', error);
+    return null;
   }
 }
 
