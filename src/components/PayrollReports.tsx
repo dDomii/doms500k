@@ -740,7 +740,7 @@ export function PayrollReports() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-slate-400">Total Salary</p>
-                <p className="text-2xl font-bold text-emerald-400">₱{totalSalary.toFixed(2)}</p>
+                <p className="text-2xl font-bold text-emerald-400">₱{Number(totalSalary).toFixed(2)}</p>
               </div>
               <div className="bg-gradient-to-br from-emerald-500/20 to-green-600/20 p-3 rounded-lg">
                 <PhilippinePeso className="w-6 h-6 text-emerald-400" />
@@ -807,7 +807,7 @@ export function PayrollReports() {
               }
             </h3>
             <p className="text-sm text-slate-400 mt-1">
-              {filteredPayrollData.length} employees • Total: ₱{totalSalary.toFixed(2)}
+              {filteredPayrollData.length} employees • Total: ₱{Number(totalSalary).toFixed(2)}
             </p>
           </div>
           <div className="overflow-x-auto">
