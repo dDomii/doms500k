@@ -5,6 +5,7 @@ import { initializeDatabase } from './database.js';
 import { loginUser, verifyToken, createUser, updateUser, deleteUser } from './auth.js';
 import { clockIn, clockOut, getTodayEntry, getOvertimeRequests, approveOvertime } from './timeTracking.js';
 import { generateWeeklyPayslips, generatePayslipsForDateRange, generatePayslipsForSpecificDays, getPayrollReport, updatePayrollEntry } from './payroll.js';
+import { getAvailableDatesWithEntries, getTimeEntriesForDate } from './payroll.js';
 import { pool } from './database.js';
 
 // Load environment variables
@@ -392,6 +393,39 @@ app.post('/api/payslips/generate', authenticate, async (req, res) => {
   }
 });
 
+app.get('/api/available-dates', authenticate, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required' });
+  }
+
+  const { userIds } = req.query;
+  const userIdArray = userIds ? userIds.split(',').map(id => parseInt(id)) : null;
+  
+  try {
+    const dates = await getAvailableDatesWithEntries(userIdArray);
+    res.json(dates);
+  } catch (error) {
+    console.error('Error fetching available dates:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.get('/api/time-entries-for-date', authenticate, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required' });
+  }
+
+  const { date, userIds } = req.query;
+  const userIdArray = userIds ? userIds.split(',').map(id => parseInt(id)) : null;
+  
+  try {
+    const entries = await getTimeEntriesForDate(date, userIdArray);
+    res.json(entries);
+  } catch (error) {
+    console.error('Error fetching time entries for date:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 app.get('/api/payroll-report', authenticate, async (req, res) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ message: 'Admin access required' });

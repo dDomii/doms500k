@@ -13,16 +13,17 @@ async function getBreaktimeSetting() {
   }
 }
 
-export async function calculateWeeklyPayroll(userId, weekStart) {
+export async function calculateDailyPayroll(userId, date) {
   try {
     const breaktimeEnabled = await getBreaktimeSetting();
     const standardHoursPerDay = 8.5; // Always 8.5 hours for ₱200 base pay
     const maxBasePay = 200; // Cap base pay at ₱200
     const hourlyRate = 200 / 8.5; // ₱23.53 per hour
     
+    // Get time entry for specific date
     const [entries] = await pool.execute(
-      'SELECT * FROM time_entries WHERE user_id = ? AND week_start = ? ORDER BY clock_in',
-      [userId, weekStart]
+      'SELECT * FROM time_entries WHERE user_id = ? AND DATE(clock_in) = ? ORDER BY clock_in',
+      [userId, date]
     );
 
     const [user] = await pool.execute(
@@ -37,7 +38,7 @@ export async function calculateWeeklyPayroll(userId, weekStart) {
     let overtimeHours = 0;
     let undertimeHours = 0;
 
-    // Get first and last clock times for the week
+    // Get first and last clock times for the day
     let firstClockIn = null;
     let lastClockOut = null;
 
@@ -62,7 +63,7 @@ export async function calculateWeeklyPayroll(userId, weekStart) {
       const effectiveClockIn = clockIn < shiftStart ? shiftStart : clockIn;
       
       // Calculate worked hours from 7:00 AM onwards only
-      let workedHours = Math.max(0, (clockOut - effectiveClockIn) / (1000 * 60 * 60));
+      let workedHours = Math.max(0, (clockOut.getTime() - effectiveClockIn.getTime()) / (1000 * 60 * 60));
       
       // Only count positive worked hours
       if (workedHours <= 0) {
@@ -79,7 +80,7 @@ export async function calculateWeeklyPayroll(userId, weekStart) {
 
       // Check for late clock in (after 7:00 AM)
       if (clockIn > shiftStart) {
-        const lateHours = (clockIn - shiftStart) / (1000 * 60 * 60);
+        const lateHours = (clockIn.getTime() - shiftStart.getTime()) / (1000 * 60 * 60);
         undertimeHours += lateHours;
       }
 
@@ -87,7 +88,7 @@ export async function calculateWeeklyPayroll(userId, weekStart) {
       if (entry.overtime_requested && entry.overtime_approved) {
         if (clockOut > shiftEnd) {
           // Overtime starts immediately at 3:30 PM when approved
-          const overtime = Math.max(0, (clockOut - shiftEnd) / (1000 * 60 * 60));
+          const overtime = Math.max(0, (clockOut.getTime() - shiftEnd.getTime()) / (1000 * 60 * 60));
           overtimeHours += overtime;
         }
       }
@@ -102,7 +103,7 @@ export async function calculateWeeklyPayroll(userId, weekStart) {
     const baseSalary = Math.min(totalHours * hourlyRate, maxBasePay);
     const overtimePay = overtimeHours * 35;
     const undertimeDeduction = undertimeHours * hourlyRate;
-    const staffHouseDeduction = userData.staff_house ? 250 : 0;
+    const staffHouseDeduction = userData.staff_house ? (250 / 5) : 0; // Daily portion of weekly deduction
     
     const totalSalary = baseSalary + overtimePay - undertimeDeduction - staffHouseDeduction;
 
@@ -119,76 +120,8 @@ export async function calculateWeeklyPayroll(userId, weekStart) {
       clockOutTime: lastClockOut ? formatDateTimeForMySQL(lastClockOut) : null
     };
   } catch (error) {
-    console.error('Calculate payroll error:', error);
+    console.error('Calculate daily payroll error:', error);
     return null;
-  }
-}
-
-// Helper function to format datetime for MySQL
-function formatDateTimeForMySQL(date) {
-  if (!date) return null;
-  
-  const d = new Date(date);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const hours = String(d.getHours()).padStart(2, '0');
-  const minutes = String(d.getMinutes()).padStart(2, '0');
-  const seconds = String(d.getSeconds()).padStart(2, '0');
-  
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-}
-
-export async function generatePayslipsForDateRange(startDate, endDate) {
-  try {
-    // Get all users who have time entries within the date range
-    const [users] = await pool.execute(`
-      SELECT DISTINCT u.* FROM users u 
-      JOIN time_entries te ON u.id = te.user_id
-      WHERE u.active = TRUE AND DATE(te.clock_in) BETWEEN ? AND ?
-      GROUP BY u.id
-    `, [startDate, endDate]);
-
-    const payslips = [];
-
-    for (const user of users) {
-      // Calculate payroll for the entire date range
-      const payroll = await calculatePayrollForDateRange(user.id, startDate, endDate);
-      if (payroll && payroll.totalHours > 0) {
-        // Check if payslip already exists for this user and date range
-        const [existing] = await pool.execute(
-          'SELECT id FROM payslips WHERE user_id = ? AND week_start = ? AND week_end = ?',
-          [user.id, startDate, endDate]
-        );
-
-        if (existing.length === 0) {
-          const [result] = await pool.execute(
-            `INSERT INTO payslips (user_id, week_start, week_end, total_hours, overtime_hours, 
-             undertime_hours, base_salary, overtime_pay, undertime_deduction, staff_house_deduction, 
-             total_salary, clock_in_time, clock_out_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              user.id, startDate, endDate,
-              payroll.totalHours, payroll.overtimeHours, payroll.undertimeHours,
-              payroll.baseSalary, payroll.overtimePay, payroll.undertimeDeduction,
-              payroll.staffHouseDeduction, payroll.totalSalary,
-              payroll.clockInTime, payroll.clockOutTime
-            ]
-          );
-
-          payslips.push({
-            id: result.insertId,
-            user: user.username,
-            department: user.department,
-            ...payroll
-          });
-        }
-      }
-    }
-
-    return payslips;
-  } catch (error) {
-    console.error('Generate payslips error:', error);
-    return [];
   }
 }
 
@@ -216,39 +149,38 @@ export async function generatePayslipsForSpecificDays(selectedDates, userIds = n
     const payslips = [];
 
     for (const user of users) {
-      // Calculate payroll for the specific selected days
-      const payroll = await calculatePayrollForSpecificDays(user.id, selectedDates);
-      if (payroll && payroll.totalHours > 0) {
-        // Create a unique identifier for this payslip based on selected dates
-        const dateRange = `${selectedDates[0]}_to_${selectedDates[selectedDates.length - 1]}`;
-        
-        // Check if payslip already exists for this user and date combination
-        const [existing] = await pool.execute(
-          'SELECT id FROM payslips WHERE user_id = ? AND week_start = ? AND week_end = ?',
-          [user.id, selectedDates[0], selectedDates[selectedDates.length - 1]]
-        );
-
-        if (existing.length === 0) {
-          const [result] = await pool.execute(
-            `INSERT INTO payslips (user_id, week_start, week_end, total_hours, overtime_hours, 
-             undertime_hours, base_salary, overtime_pay, undertime_deduction, staff_house_deduction, 
-             total_salary, clock_in_time, clock_out_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              user.id, selectedDates[0], selectedDates[selectedDates.length - 1],
-              payroll.totalHours, payroll.overtimeHours, payroll.undertimeHours,
-              payroll.baseSalary, payroll.overtimePay, payroll.undertimeDeduction,
-              payroll.staffHouseDeduction, payroll.totalSalary,
-              payroll.clockInTime, payroll.clockOutTime
-            ]
+      // Generate payslip for each selected date
+      for (const date of selectedDates) {
+        const payroll = await calculateDailyPayroll(user.id, date);
+        if (payroll && payroll.totalHours > 0) {
+          // Check if payslip already exists for this user and date
+          const [existing] = await pool.execute(
+            'SELECT id FROM payslips WHERE user_id = ? AND week_start = ? AND week_end = ?',
+            [user.id, date, date]
           );
 
-          payslips.push({
-            id: result.insertId,
-            user: user.username,
-            department: user.department,
-            selectedDates: selectedDates,
-            ...payroll
-          });
+          if (existing.length === 0) {
+            const [result] = await pool.execute(
+              `INSERT INTO payslips (user_id, week_start, week_end, total_hours, overtime_hours, 
+               undertime_hours, base_salary, overtime_pay, undertime_deduction, staff_house_deduction, 
+               total_salary, clock_in_time, clock_out_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                user.id, date, date,
+                payroll.totalHours, payroll.overtimeHours, payroll.undertimeHours,
+                payroll.baseSalary, payroll.overtimePay, payroll.undertimeDeduction,
+                payroll.staffHouseDeduction, payroll.totalSalary,
+                payroll.clockInTime, payroll.clockOutTime
+              ]
+            );
+
+            payslips.push({
+              id: result.insertId,
+              user: user.username,
+              department: user.department,
+              date: date,
+              ...payroll
+            });
+          }
         }
       }
     }
@@ -260,297 +192,89 @@ export async function generatePayslipsForSpecificDays(selectedDates, userIds = n
   }
 }
 
-export async function calculatePayrollForSpecificDays(userId, selectedDates) {
+export async function generatePayslipsForDateRange(startDate, endDate) {
   try {
-    const standardHoursPerDay = 8.5; // Always 8.5 hours for ₱200 base pay
-    const maxBasePay = 200; // Cap base pay at ₱200
-    const hourlyRate = 200 / 8.5; // ₱23.53 per hour
-    
-    // Build date conditions for specific days
-    const dateConditions = selectedDates.map(() => 'DATE(clock_in) = ?').join(' OR ');
-    
-    const [entries] = await pool.execute(
-      `SELECT * FROM time_entries WHERE user_id = ? AND (${dateConditions}) ORDER BY clock_in`,
-      [userId, ...selectedDates]
-    );
+    // Get all users who have time entries within the date range
+    const [users] = await pool.execute(`
+      SELECT DISTINCT u.* FROM users u 
+      JOIN time_entries te ON u.id = te.user_id
+      WHERE u.active = TRUE AND DATE(te.clock_in) BETWEEN ? AND ?
+      GROUP BY u.id
+    `, [startDate, endDate]);
 
-    const [user] = await pool.execute(
-      'SELECT * FROM users WHERE id = ?',
-      [userId]
-    );
+    const payslips = [];
 
-    if (user.length === 0) return null;
-
-    const userData = user[0];
-    let totalHours = 0;
-    let overtimeHours = 0;
-    let undertimeHours = 0;
-
-    // Get first and last clock times for the selected days
-    let firstClockIn = null;
-    let lastClockOut = null;
-
-    entries.forEach(entry => {
-      const clockIn = new Date(entry.clock_in);
-      let clockOut = entry.clock_out ? new Date(entry.clock_out) : null;
-
-      // Skip entries without clock_out when generating payroll
-      if (!clockOut) {
-        return; // Skip this entry
+    for (const user of users) {
+      // Get all dates between start and end date
+      const dates = [];
+      const currentDate = new Date(startDate);
+      const endDateObj = new Date(endDate);
+      
+      while (currentDate <= endDateObj) {
+        dates.push(currentDate.toISOString().split('T')[0]);
+        currentDate.setDate(currentDate.getDate() + 1);
       }
 
-      // Define shift start time (7:00 AM)
-      const shiftStart = new Date(clockIn);
-      shiftStart.setHours(7, 0, 0, 0);
-      
-      // Define shift end time (3:30 PM)
-      const shiftEnd = new Date(clockIn);
-      shiftEnd.setHours(15, 30, 0, 0);
-      
-      // Work hours only count from 7:00 AM onwards
-      const effectiveClockIn = clockIn < shiftStart ? shiftStart : clockIn;
-      
-      // Calculate worked hours from 7:00 AM onwards only
-      let workedHours = Math.max(0, (clockOut - effectiveClockIn) / (1000 * 60 * 60));
-      
-      // Only count positive worked hours
-      if (workedHours <= 0) {
-        return; // Skip if no valid work time
-      }
-      
-      // Track first clock in and last clock out
-      if (!firstClockIn || clockIn < firstClockIn) {
-        firstClockIn = clockIn;
-      }
-      if (!lastClockOut || clockOut > lastClockOut) {
-        lastClockOut = clockOut;
-      }
+      // Generate payslip for each date that has time entries
+      for (const date of dates) {
+        const [hasEntry] = await pool.execute(
+          'SELECT id FROM time_entries WHERE user_id = ? AND DATE(clock_in) = ? AND clock_out IS NOT NULL',
+          [user.id, date]
+        );
 
-      // Check for late clock in (after 7:00 AM)
-      if (clockIn > shiftStart) {
-        const lateHours = (clockIn - shiftStart) / (1000 * 60 * 60);
-        undertimeHours += lateHours;
-      }
+        if (hasEntry.length > 0) {
+          const payroll = await calculateDailyPayroll(user.id, date);
+          if (payroll && payroll.totalHours > 0) {
+            // Check if payslip already exists for this user and date
+            const [existing] = await pool.execute(
+              'SELECT id FROM payslips WHERE user_id = ? AND week_start = ? AND week_end = ?',
+              [user.id, date, date]
+            );
 
-      // Handle overtime calculation
-      if (entry.overtime_requested && entry.overtime_approved) {
-        if (clockOut > shiftEnd) {
-          // Overtime starts immediately at 3:30 PM when approved
-          const overtime = Math.max(0, (clockOut - shiftEnd) / (1000 * 60 * 60));
-          overtimeHours += overtime;
+            if (existing.length === 0) {
+              const [result] = await pool.execute(
+                `INSERT INTO payslips (user_id, week_start, week_end, total_hours, overtime_hours, 
+                 undertime_hours, base_salary, overtime_pay, undertime_deduction, staff_house_deduction, 
+                 total_salary, clock_in_time, clock_out_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  user.id, date, date,
+                  payroll.totalHours, payroll.overtimeHours, payroll.undertimeHours,
+                  payroll.baseSalary, payroll.overtimePay, payroll.undertimeDeduction,
+                  payroll.staffHouseDeduction, payroll.totalSalary,
+                  payroll.clockInTime, payroll.clockOutTime
+                ]
+              );
+
+              payslips.push({
+                id: result.insertId,
+                user: user.username,
+                department: user.department,
+                date: date,
+                ...payroll
+              });
+            }
+          }
         }
       }
-      
-      // Add to total hours - work hours are already calculated from 7:00 AM
-      // Cap at 8.5 hours per day for base pay calculation
-      const dailyBaseHours = Math.min(workedHours, standardHoursPerDay);
-      totalHours += dailyBaseHours;
-    });
+    }
 
-    // Calculate base salary (capped at ₱200 for 8.5 hours)
-    const baseSalary = Math.min(totalHours * hourlyRate, maxBasePay);
-    const overtimePay = overtimeHours * 35;
-    const undertimeDeduction = undertimeHours * hourlyRate;
-    
-    // Count actual working days from selected dates
-    const workingDays = entries.filter(entry => entry.clock_out).length;
-    const staffHouseDeduction = userData.staff_house ? (250 * workingDays / 5) : 0; // Prorated based on actual working days
-    
-    const totalSalary = baseSalary + overtimePay - undertimeDeduction - staffHouseDeduction;
-
-    return {
-      totalHours,
-      overtimeHours,
-      undertimeHours,
-      baseSalary,
-      overtimePay,
-      undertimeDeduction,
-      staffHouseDeduction,
-      totalSalary,
-      clockInTime: firstClockIn ? formatDateTimeForMySQL(firstClockIn) : null,
-      clockOutTime: lastClockOut ? formatDateTimeForMySQL(lastClockOut) : null
-    };
+    return payslips;
   } catch (error) {
-    console.error('Calculate payroll for specific days error:', error);
-    return null;
+    console.error('Generate payslips for date range error:', error);
+    return [];
   }
 }
 
-export async function calculatePayrollForDateRange(userId, startDate, endDate) {
-  try {
-    const standardHoursPerDay = 8.5; // Always 8.5 hours for ₱200 base pay
-    const maxBasePay = 200; // Cap base pay at ₱200
-    const hourlyRate = 200 / 8.5; // ₱23.53 per hour
-    
-    const [entries] = await pool.execute(
-      'SELECT * FROM time_entries WHERE user_id = ? AND DATE(clock_in) BETWEEN ? AND ? ORDER BY clock_in',
-      [userId, startDate, endDate]
-    );
-
-    const [user] = await pool.execute(
-      'SELECT * FROM users WHERE id = ?',
-      [userId]
-    );
-
-    if (user.length === 0) return null;
-
-    const userData = user[0];
-    let totalHours = 0;
-    let overtimeHours = 0;
-    let undertimeHours = 0;
-
-    // Get first and last clock times for the date range
-    let firstClockIn = null;
-    let lastClockOut = null;
-
-    entries.forEach(entry => {
-      const clockIn = new Date(entry.clock_in);
-      let clockOut = entry.clock_out ? new Date(entry.clock_out) : null;
-
-      // Skip entries without clock_out when generating payroll
-      if (!clockOut) {
-        return; // Skip this entry
-      }
-
-      // Define shift start time (7:00 AM)
-      const shiftStart = new Date(clockIn);
-      shiftStart.setHours(7, 0, 0, 0);
-      
-      // Define shift end time (3:30 PM)
-      const shiftEnd = new Date(clockIn);
-      shiftEnd.setHours(15, 30, 0, 0);
-      
-      // Work hours only count from 7:00 AM onwards
-      const effectiveClockIn = clockIn < shiftStart ? shiftStart : clockIn;
-      
-      // Calculate worked hours from 7:00 AM onwards only
-      let workedHours = Math.max(0, (clockOut - effectiveClockIn) / (1000 * 60 * 60));
-      
-      // Only count positive worked hours
-      if (workedHours <= 0) {
-        return; // Skip if no valid work time
-      }
-      
-      // Track first clock in and last clock out
-      if (!firstClockIn || clockIn < firstClockIn) {
-        firstClockIn = clockIn;
-      }
-      if (!lastClockOut || clockOut > lastClockOut) {
-        lastClockOut = clockOut;
-      }
-
-      // Check for late clock in (after 7:00 AM)
-      if (clockIn > shiftStart) {
-        const lateHours = (clockIn - shiftStart) / (1000 * 60 * 60);
-        undertimeHours += lateHours;
-      }
-
-
-      // Handle overtime calculation
-      if (entry.overtime_requested && entry.overtime_approved) {
-        if (clockOut > shiftEnd) {
-          // Overtime starts immediately at 3:30 PM when approved
-          const overtime = Math.max(0, (clockOut - shiftEnd) / (1000 * 60 * 60));
-          overtimeHours += overtime;
-        }
-      }
-      
-      // Add to total hours - work hours are already calculated from 7:00 AM
-      // Cap at 8.5 hours per day for base pay calculation
-      const dailyBaseHours = Math.min(workedHours, standardHoursPerDay);
-      totalHours += dailyBaseHours;
-    });
-
-    // Calculate base salary (capped at ₱200 for 8.5 hours)
-    const baseSalary = Math.min(totalHours * hourlyRate, maxBasePay);
-    const overtimePay = overtimeHours * 35;
-    const undertimeDeduction = undertimeHours * hourlyRate;
-    
-    // Calculate number of working days for staff house deduction
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const daysDiff = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
-    const staffHouseDeduction = userData.staff_house ? (250 * daysDiff / 5) : 0; // Prorated
-    
-    const totalSalary = baseSalary + overtimePay - undertimeDeduction - staffHouseDeduction;
-
-    return {
-      totalHours,
-      overtimeHours,
-      undertimeHours,
-      baseSalary,
-      overtimePay,
-      undertimeDeduction,
-      staffHouseDeduction,
-      totalSalary,
-      clockInTime: firstClockIn ? formatDateTimeForMySQL(firstClockIn) : null,
-      clockOutTime: lastClockOut ? formatDateTimeForMySQL(lastClockOut) : null
-    };
-  } catch (error) {
-    console.error('Calculate payroll for date range error:', error);
-    return null;
-  }
-}
-
-// Keep the original function for backward compatibility
+// Keep the original weekly function for backward compatibility
 export async function generateWeeklyPayslips(weekStart) {
   try {
     const weekEnd = new Date(weekStart);
     weekEnd.setDate(weekEnd.getDate() + 6);
     const weekEndStr = weekEnd.toISOString().split('T')[0];
     
-    // Get all time entries for this week
-    const [timeEntries] = await pool.execute(`
-      SELECT te.*, u.username, u.department, u.staff_house
-      FROM time_entries te
-      JOIN users u ON te.user_id = u.id
-      WHERE u.active = TRUE AND DATE(te.clock_in) BETWEEN ? AND ? AND te.clock_out IS NOT NULL
-      ORDER BY u.id, DATE(te.clock_in)
-    `, [weekStart, weekEndStr]);
-
-    const payslips = [];
-
-    for (const entry of timeEntries) {
-      const entryDate = new Date(entry.clock_in).toISOString().split('T')[0];
-      
-      // Check if payslip already exists for this user and specific date
-      const [existing] = await pool.execute(
-        'SELECT id FROM payslips WHERE user_id = ? AND week_start = ? AND week_end = ?',
-        [entry.user_id, entryDate, entryDate]
-      );
-
-      if (existing.length > 0) {
-        continue; // Skip if payslip already exists for this day
-      }
-
-      const payroll = await calculatePayrollForSingleEntry(entry);
-      if (payroll && payroll.totalHours > 0) {
-        const [result] = await pool.execute(
-          `INSERT INTO payslips (user_id, week_start, week_end, total_hours, overtime_hours, 
-           undertime_hours, base_salary, overtime_pay, undertime_deduction, staff_house_deduction, 
-           total_salary, clock_in_time, clock_out_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            entry.user_id, entryDate, entryDate,
-            payroll.totalHours, payroll.overtimeHours, payroll.undertimeHours,
-            payroll.baseSalary, payroll.overtimePay, payroll.undertimeDeduction,
-            payroll.staffHouseDeduction, payroll.totalSalary,
-            payroll.clockInTime, payroll.clockOutTime
-          ]
-        );
-
-        payslips.push({
-          id: result.insertId,
-          user: entry.username,
-          department: entry.department,
-          date: entryDate,
-          ...payroll
-        });
-      }
-    }
-
-    return payslips;
+    return await generatePayslipsForDateRange(weekStart, weekEndStr);
   } catch (error) {
-    console.error('Generate payslips error:', error);
+    console.error('Generate weekly payslips error:', error);
     return [];
   }
 }
@@ -562,29 +286,26 @@ export async function getPayrollReport(startDate, endDate = null) {
     let query, params;
     
     if (endDate) {
-      // Date range query
+      // Date range query - get all payslips within the range
       query = `SELECT p.*, u.username, u.department 
                FROM payslips p 
                JOIN users u ON p.user_id = u.id 
-               WHERE p.week_start = ? AND p.week_end = ?
-               ORDER BY u.department, u.username`;
+               WHERE DATE(p.week_start) BETWEEN ? AND DATE(p.week_end)
+               ORDER BY p.week_start DESC, u.department, u.username`;
       params = [startDate, endDate];
     } else {
-      // Single week query (backward compatibility)
+      // Single date query
       query = `SELECT p.*, u.username, u.department 
                FROM payslips p 
                JOIN users u ON p.user_id = u.id 
-               WHERE p.week_start = ? 
+               WHERE DATE(p.week_start) = ? 
                ORDER BY u.department, u.username`;
       params = [startDate];
     }
     
     console.log('Executing query:', query, 'with params:', params);
     
-    const [payslips] = await pool.execute(
-      query,
-      params
-    );
+    const [payslips] = await pool.execute(query, params);
 
     console.log('Found payslips:', payslips.length);
     return payslips;
@@ -604,20 +325,6 @@ export async function updatePayrollEntry(payslipId, updateData) {
     const formattedClockIn = clockIn ? formatDateTimeForMySQL(new Date(clockIn)) : null;
     const formattedClockOut = clockOut ? formatDateTimeForMySQL(new Date(clockOut)) : null;
 
-    // Get the payslip to find the user_id and update their worked hours
-    const [payslipResult] = await pool.execute(
-      'SELECT user_id, total_hours as old_total_hours FROM payslips WHERE id = ?',
-      [payslipId]
-    );
-    
-    if (payslipResult.length === 0) {
-      return { success: false, message: 'Payslip not found' };
-    }
-    
-    const userId = payslipResult[0].user_id;
-    const oldTotalHours = parseFloat(payslipResult[0].old_total_hours) || 0;
-    const newTotalHours = parseFloat(totalHours) || 0;
-    const hoursDifference = newTotalHours - oldTotalHours;
     await pool.execute(
       `UPDATE payslips SET 
        clock_in_time = ?, clock_out_time = ?, total_hours = ?, overtime_hours = ?, 
@@ -627,35 +334,78 @@ export async function updatePayrollEntry(payslipId, updateData) {
       [formattedClockIn, formattedClockOut, totalHours, overtimeHours, undertimeHours, baseSalary, overtimePay, undertimeDeduction, staffHouseDeduction, totalSalary, payslipId]
     );
 
-    // Update the user's worked hours in time_entries if there's a significant change
-    if (Math.abs(hoursDifference) > 0.01) { // Only update if difference is more than 0.01 hours
-      // Create an adjustment entry to reflect the change in progress tracker
-      const adjustmentDate = new Date().toISOString().split('T')[0];
-      const weekStart = getWeekStart(new Date());
-      
-      // Insert an adjustment entry
-      await pool.execute(
-        `INSERT INTO time_entries (user_id, clock_in, clock_out, date, week_start, overtime_requested, overtime_approved) 
-         VALUES (?, ?, ?, ?, ?, FALSE, NULL)`,
-        [
-          userId,
-          formattedClockIn || new Date().toISOString(),
-          formattedClockOut || new Date().toISOString(),
-          adjustmentDate,
-          weekStart
-        ]
-      );
-    }
     return { success: true };
   } catch (error) {
     console.error('Update payroll entry error:', error);
     return { success: false, message: 'Server error' };
   }
 }
-// Helper function to get week start
-function getWeekStart(date) {
+
+// Helper function to format datetime for MySQL
+function formatDateTimeForMySQL(date) {
+  if (!date) return null;
+  
   const d = new Date(date);
-  const day = d.getDay();
-  const diff = d.getDate() - day;
-  return new Date(d.setDate(diff)).toISOString().split('T')[0];
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const seconds = String(d.getSeconds()).padStart(2, '0');
+  
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+// New function to get available dates with time entries
+export async function getAvailableDatesWithEntries(userIds = null) {
+  try {
+    let query = `
+      SELECT DISTINCT DATE(te.clock_in) as entry_date, 
+             COUNT(DISTINCT te.user_id) as user_count,
+             COUNT(te.id) as total_entries
+      FROM time_entries te 
+      JOIN users u ON te.user_id = u.id 
+      WHERE u.active = TRUE AND te.clock_out IS NOT NULL
+    `;
+    let params = [];
+    
+    if (userIds && userIds.length > 0) {
+      query += ` AND u.id IN (${userIds.map(() => '?').join(',')})`;
+      params.push(...userIds);
+    }
+    
+    query += ` GROUP BY DATE(te.clock_in) ORDER BY entry_date DESC LIMIT 30`;
+    
+    const [dates] = await pool.execute(query, params);
+    return dates;
+  } catch (error) {
+    console.error('Error getting available dates:', error);
+    return [];
+  }
+}
+
+// New function to get time entries for specific date
+export async function getTimeEntriesForDate(date, userIds = null) {
+  try {
+    let query = `
+      SELECT te.*, u.username, u.department 
+      FROM time_entries te 
+      JOIN users u ON te.user_id = u.id 
+      WHERE DATE(te.clock_in) = ? AND u.active = TRUE
+    `;
+    let params = [date];
+    
+    if (userIds && userIds.length > 0) {
+      query += ` AND u.id IN (${userIds.map(() => '?').join(',')})`;
+      params.push(...userIds);
+    }
+    
+    query += ` ORDER BY u.department, u.username, te.clock_in`;
+    
+    const [entries] = await pool.execute(query, params);
+    return entries;
+  } catch (error) {
+    console.error('Error getting time entries for date:', error);
+    return [];
+  }
 }
