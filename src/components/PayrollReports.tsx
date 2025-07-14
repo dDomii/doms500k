@@ -434,6 +434,7 @@ export function PayrollReports() {
 
     const headers = [
       'Employee',
+      'Date',
       'Department',
       'Clock In',
       'Clock Out',
@@ -450,6 +451,7 @@ export function PayrollReports() {
 
     const rows = payrollData.map(entry => [
       entry.username,
+      formatDate(entry.week_start),
       entry.department,
       entry.clock_in_time ? new Date(entry.clock_in_time).toLocaleString() : 'N/A',
       entry.clock_out_time ? new Date(entry.clock_out_time).toLocaleString() : 'N/A',

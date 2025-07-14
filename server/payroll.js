@@ -260,80 +260,6 @@ export async function generatePayslipsForSpecificDays(selectedDates, userIds = n
   }
 }
 
-// New function to calculate payroll for a single time entry
-export async function calculatePayrollForSingleEntry(entry) {
-  try {
-    const standardHoursPerDay = 8.5; // Always 8.5 hours for ₱200 base pay
-    const maxBasePay = 200; // Cap base pay at ₱200
-    const hourlyRate = 200 / 8.5; // ₱23.53 per hour
-    
-    const clockIn = new Date(entry.clock_in);
-    const clockOut = new Date(entry.clock_out);
-
-    // Define shift start time (7:00 AM)
-    const shiftStart = new Date(clockIn);
-    shiftStart.setHours(7, 0, 0, 0);
-    
-    // Define shift end time (3:30 PM)
-    const shiftEnd = new Date(clockIn);
-    shiftEnd.setHours(15, 30, 0, 0);
-    
-    // Work hours only count from 7:00 AM onwards
-    const effectiveClockIn = clockIn < shiftStart ? shiftStart : clockIn;
-    
-    // Calculate worked hours from 7:00 AM onwards only
-    let workedHours = Math.max(0, (clockOut.getTime() - effectiveClockIn.getTime()) / (1000 * 60 * 60));
-    
-    // Only count positive worked hours
-    if (workedHours <= 0) {
-      return null; // Skip if no valid work time
-    }
-    
-    let undertimeHours = 0;
-    let overtimeHours = 0;
-    
-    // Check for late clock in (after 7:00 AM)
-    if (clockIn > shiftStart) {
-      undertimeHours = (clockIn.getTime() - shiftStart.getTime()) / (1000 * 60 * 60);
-    }
-
-    // Handle overtime calculation - only if requested and approved
-    if (entry.overtime_requested && entry.overtime_approved) {
-      if (clockOut > shiftEnd) {
-        // Overtime starts immediately at 3:30 PM when approved
-        overtimeHours = Math.max(0, (clockOut.getTime() - shiftEnd.getTime()) / (1000 * 60 * 60));
-      }
-    }
-    
-    // Calculate base salary (capped at ₱200 for 8.5 hours)
-    const dailyBaseHours = Math.min(workedHours, standardHoursPerDay);
-    const baseSalary = Math.min(dailyBaseHours * hourlyRate, maxBasePay);
-    const overtimePay = overtimeHours * 35;
-    const undertimeDeduction = undertimeHours * hourlyRate;
-    
-    // Daily staff house deduction (₱50 per day if enrolled)
-    const staffHouseDeduction = entry.staff_house ? 50 : 0;
-    
-    const totalSalary = baseSalary + overtimePay - undertimeDeduction - staffHouseDeduction;
-
-    return {
-      totalHours: dailyBaseHours,
-      overtimeHours,
-      undertimeHours,
-      baseSalary,
-      overtimePay,
-      undertimeDeduction,
-      staffHouseDeduction,
-      totalSalary,
-      clockInTime: formatDateTimeForMySQL(clockIn),
-      clockOutTime: formatDateTimeForMySQL(clockOut)
-    };
-  } catch (error) {
-    console.error('Calculate payroll for single entry error:', error);
-    return null;
-  }
-}
-
 export async function calculatePayrollForSpecificDays(userId, selectedDates) {
   try {
     const standardHoursPerDay = 8.5; // Always 8.5 hours for ₱200 base pay
@@ -569,51 +495,56 @@ export async function calculatePayrollForDateRange(userId, startDate, endDate) {
 // Keep the original function for backward compatibility
 export async function generateWeeklyPayslips(weekStart) {
   try {
-    // Get all users who have time entries for this week OR are currently active
-    const [users] = await pool.execute(`
-      SELECT DISTINCT u.* FROM users u 
-      LEFT JOIN time_entries te ON u.id = te.user_id AND te.week_start = ?
-      WHERE u.active = TRUE AND (te.user_id IS NOT NULL OR u.id IN (
-        SELECT DISTINCT user_id FROM time_entries 
-        WHERE DATE(clock_in) BETWEEN ? AND DATE_ADD(?, INTERVAL 6 DAY)
-      ))
-    `, [weekStart, weekStart, weekStart]);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    const weekEndStr = weekEnd.toISOString().split('T')[0];
+    
+    // Get all time entries for this week
+    const [timeEntries] = await pool.execute(`
+      SELECT te.*, u.username, u.department, u.staff_house
+      FROM time_entries te
+      JOIN users u ON te.user_id = u.id
+      WHERE u.active = TRUE AND DATE(te.clock_in) BETWEEN ? AND ? AND te.clock_out IS NOT NULL
+      ORDER BY u.id, DATE(te.clock_in)
+    `, [weekStart, weekEndStr]);
 
     const payslips = [];
 
-    for (const user of users) {
-      const payroll = await calculateWeeklyPayroll(user.id, weekStart);
-      if (payroll && payroll.totalHours > 0) {
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekEnd.getDate() + 6);
+    for (const entry of timeEntries) {
+      const entryDate = new Date(entry.clock_in).toISOString().split('T')[0];
+      
+      // Check if payslip already exists for this user and specific date
+      const [existing] = await pool.execute(
+        'SELECT id FROM payslips WHERE user_id = ? AND week_start = ? AND week_end = ?',
+        [entry.user_id, entryDate, entryDate]
+      );
 
-        // Check if payslip already exists for this user and week
-        const [existing] = await pool.execute(
-          'SELECT id FROM payslips WHERE user_id = ? AND week_start = ?',
-          [user.id, weekStart]
+      if (existing.length > 0) {
+        continue; // Skip if payslip already exists for this day
+      }
+
+      const payroll = await calculatePayrollForSingleEntry(entry);
+      if (payroll && payroll.totalHours > 0) {
+        const [result] = await pool.execute(
+          `INSERT INTO payslips (user_id, week_start, week_end, total_hours, overtime_hours, 
+           undertime_hours, base_salary, overtime_pay, undertime_deduction, staff_house_deduction, 
+           total_salary, clock_in_time, clock_out_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            entry.user_id, entryDate, entryDate,
+            payroll.totalHours, payroll.overtimeHours, payroll.undertimeHours,
+            payroll.baseSalary, payroll.overtimePay, payroll.undertimeDeduction,
+            payroll.staffHouseDeduction, payroll.totalSalary,
+            payroll.clockInTime, payroll.clockOutTime
+          ]
         );
 
-        if (existing.length === 0) {
-          const [result] = await pool.execute(
-            `INSERT INTO payslips (user_id, week_start, week_end, total_hours, overtime_hours, 
-             undertime_hours, base_salary, overtime_pay, undertime_deduction, staff_house_deduction, 
-             total_salary, clock_in_time, clock_out_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              user.id, weekStart, weekEnd.toISOString().split('T')[0],
-              payroll.totalHours, payroll.overtimeHours, payroll.undertimeHours,
-              payroll.baseSalary, payroll.overtimePay, payroll.undertimeDeduction,
-              payroll.staffHouseDeduction, payroll.totalSalary,
-              payroll.clockInTime, payroll.clockOutTime
-            ]
-          );
-
-          payslips.push({
-            id: result.insertId,
-            user: user.username,
-            department: user.department,
-            ...payroll
-          });
-        }
+        payslips.push({
+          id: result.insertId,
+          user: entry.username,
+          department: entry.department,
+          date: entryDate,
+          ...payroll
+        });
       }
     }
 
