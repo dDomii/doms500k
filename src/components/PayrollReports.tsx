@@ -1077,7 +1077,7 @@ export function PayrollReports() {
                 ₱{(editForm.baseSalary + editForm.overtimePay - editForm.undertimeDeduction - editForm.staffHouseDeduction).toFixed(2)}
               </div>
               <p className="text-sm text-slate-400 mt-1">
-                Base (₱{editForm.baseSalary.toFixed(2)}) + Overtime (₱{editForm.overtimePay.toFixed(2)}) - Deductions (₱{(editForm.undertimeDeduction + editForm.staffHouseDeduction).toFixed(2)})
+                Base (₱{Number(editForm.baseSalary).toFixed(2)}) + Overtime (₱{Number(editForm.overtimePay).toFixed(2)}) - Deductions (₱{(editForm.undertimeDeduction + editForm.staffHouseDeduction).toFixed(2)})
               </p>
             </div>
 
