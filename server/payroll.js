@@ -62,13 +62,15 @@ export async function calculateWeeklyPayroll(userId, weekStart) {
       const effectiveClockIn = clockIn < shiftStart ? shiftStart : clockIn;
       
       // Calculate worked hours from effective clock in time
-      const workedHours = (clockOut - effectiveClockIn) / (1000 * 60 * 60);
+      let workedHours = (clockOut - effectiveClockIn) / (1000 * 60 * 60);
       
       // Only count positive worked hours
       if (workedHours <= 0) {
         return; // Skip if no valid work time
       }
-      const workedHours = (clockOut - clockIn) / (1000 * 60 * 60);
+      
+      // Recalculate worked hours from actual clock in for other calculations
+      workedHours = (clockOut - clockIn) / (1000 * 60 * 60);
 
       // Track first clock in and last clock out
       if (!firstClockIn || clockIn < firstClockIn) {
@@ -311,13 +313,15 @@ export async function calculatePayrollForSpecificDays(userId, selectedDates) {
       const effectiveClockIn = clockIn < shiftStart ? shiftStart : clockIn;
       
       // Calculate worked hours from effective clock in time
-      const workedHours = (clockOut - effectiveClockIn) / (1000 * 60 * 60);
+      let workedHours = (clockOut - effectiveClockIn) / (1000 * 60 * 60);
       
       // Only count positive worked hours
       if (workedHours <= 0) {
         return; // Skip if no valid work time
       }
-      const workedHours = (clockOut - clockIn) / (1000 * 60 * 60);
+      
+      // Recalculate worked hours from actual clock in for other calculations
+      workedHours = (clockOut - clockIn) / (1000 * 60 * 60);
 
       // Track first clock in and last clock out
       if (!firstClockIn || clockIn < firstClockIn) {
@@ -424,13 +428,15 @@ export async function calculatePayrollForDateRange(userId, startDate, endDate) {
       const effectiveClockIn = clockIn < shiftStart ? shiftStart : clockIn;
       
       // Calculate worked hours from effective clock in time
-      const workedHours = (clockOut - effectiveClockIn) / (1000 * 60 * 60);
+      let workedHours = (clockOut - effectiveClockIn) / (1000 * 60 * 60);
       
       // Only count positive worked hours
       if (workedHours <= 0) {
         return; // Skip if no valid work time
       }
-      const workedHours = (clockOut - clockIn) / (1000 * 60 * 60);
+      
+      // Recalculate worked hours from actual clock in for other calculations
+      workedHours = (clockOut - clockIn) / (1000 * 60 * 60);
 
       // Track first clock in and last clock out
       if (!firstClockIn || clockIn < firstClockIn) {
