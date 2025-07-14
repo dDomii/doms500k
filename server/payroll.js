@@ -58,20 +58,17 @@ export async function calculateWeeklyPayroll(userId, weekStart) {
       const shiftEnd = new Date(clockIn);
       shiftEnd.setHours(15, 30, 0, 0);
       
-      // Adjust clock in time if before 7:00 AM (work doesn't count before 7:00 AM)
+      // Work hours only count from 7:00 AM onwards
       const effectiveClockIn = clockIn < shiftStart ? shiftStart : clockIn;
       
-      // Calculate worked hours from effective clock in time
-      let workedHours = (clockOut - effectiveClockIn) / (1000 * 60 * 60);
+      // Calculate worked hours from 7:00 AM onwards only
+      let workedHours = Math.max(0, (clockOut - effectiveClockIn) / (1000 * 60 * 60));
       
       // Only count positive worked hours
       if (workedHours <= 0) {
         return; // Skip if no valid work time
       }
       
-      // Recalculate worked hours from actual clock in for other calculations
-      workedHours = (clockOut - clockIn) / (1000 * 60 * 60);
-
       // Track first clock in and last clock out
       if (!firstClockIn || clockIn < firstClockIn) {
         firstClockIn = clockIn;
@@ -95,7 +92,8 @@ export async function calculateWeeklyPayroll(userId, weekStart) {
         }
       }
       
-      // Add to total hours (capped at 8.5 hours per day for base pay calculation)
+      // Add to total hours - work hours are already calculated from 7:00 AM
+      // Cap at 8.5 hours per day for base pay calculation
       const dailyBaseHours = Math.min(workedHours, standardHoursPerDay);
       totalHours += dailyBaseHours;
     });
@@ -309,20 +307,17 @@ export async function calculatePayrollForSpecificDays(userId, selectedDates) {
       const shiftEnd = new Date(clockIn);
       shiftEnd.setHours(15, 30, 0, 0);
       
-      // Adjust clock in time if before 7:00 AM (work doesn't count before 7:00 AM)
+      // Work hours only count from 7:00 AM onwards
       const effectiveClockIn = clockIn < shiftStart ? shiftStart : clockIn;
       
-      // Calculate worked hours from effective clock in time
-      let workedHours = (clockOut - effectiveClockIn) / (1000 * 60 * 60);
+      // Calculate worked hours from 7:00 AM onwards only
+      let workedHours = Math.max(0, (clockOut - effectiveClockIn) / (1000 * 60 * 60));
       
       // Only count positive worked hours
       if (workedHours <= 0) {
         return; // Skip if no valid work time
       }
       
-      // Recalculate worked hours from actual clock in for other calculations
-      workedHours = (clockOut - clockIn) / (1000 * 60 * 60);
-
       // Track first clock in and last clock out
       if (!firstClockIn || clockIn < firstClockIn) {
         firstClockIn = clockIn;
@@ -346,7 +341,8 @@ export async function calculatePayrollForSpecificDays(userId, selectedDates) {
         }
       }
       
-      // Add to total hours (capped at 8.5 hours per day for base pay calculation)
+      // Add to total hours - work hours are already calculated from 7:00 AM
+      // Cap at 8.5 hours per day for base pay calculation
       const dailyBaseHours = Math.min(workedHours, standardHoursPerDay);
       totalHours += dailyBaseHours;
     });
@@ -424,20 +420,17 @@ export async function calculatePayrollForDateRange(userId, startDate, endDate) {
       const shiftEnd = new Date(clockIn);
       shiftEnd.setHours(15, 30, 0, 0);
       
-      // Adjust clock in time if before 7:00 AM (work doesn't count before 7:00 AM)
+      // Work hours only count from 7:00 AM onwards
       const effectiveClockIn = clockIn < shiftStart ? shiftStart : clockIn;
       
-      // Calculate worked hours from effective clock in time
-      let workedHours = (clockOut - effectiveClockIn) / (1000 * 60 * 60);
+      // Calculate worked hours from 7:00 AM onwards only
+      let workedHours = Math.max(0, (clockOut - effectiveClockIn) / (1000 * 60 * 60));
       
       // Only count positive worked hours
       if (workedHours <= 0) {
         return; // Skip if no valid work time
       }
       
-      // Recalculate worked hours from actual clock in for other calculations
-      workedHours = (clockOut - clockIn) / (1000 * 60 * 60);
-
       // Track first clock in and last clock out
       if (!firstClockIn || clockIn < firstClockIn) {
         firstClockIn = clockIn;
@@ -462,7 +455,8 @@ export async function calculatePayrollForDateRange(userId, startDate, endDate) {
         }
       }
       
-      // Add to total hours (capped at 8.5 hours per day for base pay calculation)
+      // Add to total hours - work hours are already calculated from 7:00 AM
+      // Cap at 8.5 hours per day for base pay calculation
       const dailyBaseHours = Math.min(workedHours, standardHoursPerDay);
       totalHours += dailyBaseHours;
     });
