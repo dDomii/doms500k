@@ -408,7 +408,7 @@ export function PayrollReports() {
     const tableData = payrollData.map(entry => [
       entry.username,
       entry.department,
-      entry.total_hours.toFixed(2),
+      Number(entry.total_hours).toFixed(2),
       entry.overtime_hours.toFixed(2),
       `₱${entry.base_salary.toFixed(2)}`,
       `₱${entry.overtime_pay.toFixed(2)}`,
