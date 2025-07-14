@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Calendar, Download, FileText, Users, PhilippinePeso, Clock, Edit3, Save, X, AlertTriangle, CheckCircle, Filter, Search, Eye, Trash2 } from 'lucide-react';
+import { Calendar, Download, FileText, Users, PhilippinePeso, Clock, Edit3, Save, X, AlertTriangle, CheckCircle, Filter, Search, Eye, Trash2, User } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { autoTable } from 'jspdf-autotable';
 
@@ -42,6 +42,10 @@ export function PayrollReports() {
   const [selectedUsers, setSelectedUsers] = useState<number[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [availableDates, setAvailableDates] = useState<any[]>([]);
+  const [previewEntries, setPreviewEntries] = useState<any[]>([]);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [previewDate, setPreviewDate] = useState('');
   const [generationMode, setGenerationMode] = useState<'week' | 'dates'>('week');
   const [editingEntry, setEditingEntry] = useState<PayrollEntry | null>(null);
   const [editForm, setEditForm] = useState({
@@ -64,11 +68,18 @@ export function PayrollReports() {
 
   useEffect(() => {
     fetchUsers();
+    fetchAvailableDates();
     // Set current week as default
     const today = new Date();
     const currentWeekStart = getWeekStart(today);
     setSelectedWeek(currentWeekStart);
   }, []);
+
+  useEffect(() => {
+    if (selectedUsers.length > 0) {
+      fetchAvailableDates();
+    }
+  }, [selectedUsers]);
 
   const getWeekStart = (date: Date) => {
     const d = new Date(date);
@@ -128,6 +139,42 @@ export function PayrollReports() {
       setUsers(data.filter((user: any) => user.active));
     } catch (error) {
       console.error('Error fetching users:', error);
+    }
+  };
+
+  const fetchAvailableDates = async () => {
+    try {
+      let url = 'http://192.168.100.60:3001/api/available-dates';
+      if (selectedUsers.length > 0) {
+        url += `?userIds=${selectedUsers.join(',')}`;
+      }
+      
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      setAvailableDates(data);
+    } catch (error) {
+      console.error('Error fetching available dates:', error);
+    }
+  };
+
+  const fetchTimeEntriesForDate = async (date: string) => {
+    try {
+      let url = `http://192.168.100.60:3001/api/time-entries-for-date?date=${date}`;
+      if (selectedUsers.length > 0) {
+        url += `&userIds=${selectedUsers.join(',')}`;
+      }
+      
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      setPreviewEntries(data);
+      setPreviewDate(date);
+      setShowPreviewModal(true);
+    } catch (error) {
+      console.error('Error fetching time entries for date:', error);
     }
   };
 
@@ -590,6 +637,45 @@ export function PayrollReports() {
                 <label className="block text-sm font-medium text-slate-300 mb-3">
                   Select Dates ({selectedDates.length} selected)
                 </label>
+                
+                {/* Available Dates with Entry Counts */}
+                <div className="mb-4 p-3 bg-slate-700/30 rounded-lg border border-slate-600/50">
+                  <h4 className="text-sm font-medium text-slate-300 mb-2">Available Dates with Time Entries</h4>
+                  <div className="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto">
+                    {availableDates.map(dateInfo => (
+                      <div key={dateInfo.entry_date} className="flex items-center justify-between p-2 bg-slate-800/50 rounded border border-slate-600/30">
+                        <label className="flex items-center space-x-2 cursor-pointer flex-1">
+                          <input
+                            type="checkbox"
+                            checked={selectedDates.includes(dateInfo.entry_date)}
+                            onChange={() => handleDateToggle(dateInfo.entry_date)}
+                            className="rounded border-slate-600 text-emerald-600 focus:ring-emerald-500 bg-slate-700/50"
+                          />
+                          <span className="text-sm text-slate-300">
+                            {new Date(dateInfo.entry_date).toLocaleDateString('en-US', { 
+                              weekday: 'short', 
+                              month: 'short', 
+                              day: 'numeric' 
+                            })}
+                          </span>
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400">
+                            {dateInfo.user_count} users • {dateInfo.total_entries} entries
+                          </span>
+                          <button
+                            onClick={() => fetchTimeEntriesForDate(dateInfo.entry_date)}
+                            className="text-blue-400 hover:text-blue-300 p-1 rounded hover:bg-blue-900/30 transition-all duration-200"
+                            title="Preview entries"
+                          >
+                            <Eye className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                
                 <div className="bg-slate-700/30 rounded-lg p-4 max-h-60 overflow-y-auto border border-slate-600/50">
                   <div className="grid grid-cols-2 gap-2">
                     {dateOptions.map(date => (
@@ -926,6 +1012,121 @@ export function PayrollReports() {
           <p className="text-slate-400">
             Please select a {generationMode === 'week' ? 'week' : 'dates'} above to generate or view payroll reports.
           </p>
+        </div>
+      )}
+
+      {/* Time Entries Preview Modal */}
+      {showPreviewModal && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-800/95 backdrop-blur-sm rounded-2xl shadow-xl p-6 w-full max-w-4xl border border-slate-700/50 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <Calendar className="w-6 h-6 text-blue-400" />
+                <div>
+                  <h3 className="text-xl font-semibold text-white">Time Entries Preview</h3>
+                  <p className="text-slate-400">{new Date(previewDate).toLocaleDateString('en-US', { 
+                    weekday: 'long', 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowPreviewModal(false)}
+                className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700/50 transition-all duration-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            {previewEntries.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full">
+                  <thead className="bg-slate-700/50">
+                    <tr>
+                      <th className="text-left py-3 px-4 font-semibold text-slate-300">Employee</th>
+                      <th className="text-left py-3 px-4 font-semibold text-slate-300">Department</th>
+                      <th className="text-left py-3 px-4 font-semibold text-slate-300">Clock In</th>
+                      <th className="text-left py-3 px-4 font-semibold text-slate-300">Clock Out</th>
+                      <th className="text-right py-3 px-4 font-semibold text-slate-300">Hours</th>
+                      <th className="text-center py-3 px-4 font-semibold text-slate-300">Overtime</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/50">
+                    {previewEntries.map((entry) => {
+                      const clockIn = new Date(entry.clock_in);
+                      const clockOut = entry.clock_out ? new Date(entry.clock_out) : null;
+                      const workedHours = clockOut ? (clockOut.getTime() - clockIn.getTime()) / (1000 * 60 * 60) : 0;
+                      
+                      return (
+                        <tr key={entry.id} className="hover:bg-slate-700/30 transition-colors">
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-3">
+                              <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/20 p-2 rounded-lg">
+                                <User className="w-4 h-4 text-blue-400" />
+                              </div>
+                              <span className="font-medium text-white">{entry.username}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-slate-300">{entry.department}</td>
+                          <td className="py-3 px-4">
+                            <span className="text-emerald-400">
+                              {clockIn.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            {clockOut ? (
+                              <span className="text-red-400">
+                                {clockOut.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            ) : (
+                              <span className="text-slate-500">Still active</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-right text-white">
+                            {workedHours.toFixed(2)}h
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            {entry.overtime_requested ? (
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                entry.overtime_approved === null
+                                  ? 'bg-yellow-900/20 text-yellow-400 border border-yellow-800/50'
+                                  : entry.overtime_approved
+                                  ? 'bg-emerald-900/20 text-emerald-400 border border-emerald-800/50'
+                                  : 'bg-red-900/20 text-red-400 border border-red-800/50'
+                              }`}>
+                                {entry.overtime_approved === null ? 'Pending' : (entry.overtime_approved ? 'Approved' : 'Rejected')}
+                              </span>
+                            ) : (
+                              <span className="text-slate-500">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <div className="bg-slate-700/30 p-4 rounded-full w-20 h-20 mx-auto mb-4 flex items-center justify-center">
+                  <Calendar className="w-10 h-10 text-slate-500" />
+                </div>
+                <h3 className="text-lg font-medium text-white mb-2">No Time Entries</h3>
+                <p className="text-slate-400">No time entries found for this date.</p>
+              </div>
+            )}
+            
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => setShowPreviewModal(false)}
+                className="bg-gradient-to-r from-slate-600 to-slate-700 text-white py-2 px-4 rounded-lg font-medium hover:from-slate-700 hover:to-slate-800 transition-all duration-200"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

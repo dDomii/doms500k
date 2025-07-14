@@ -326,16 +326,16 @@ export function PayrollHistory() {
             <h3 className="text-lg font-semibold text-white">
               {selectedDay 
                 ? `${daysInWeek.find(d => d.value === selectedDay)?.label || formatDate(selectedDay)}`
-                : `Week of ${formatDate(selectedWeek)} - ${formatDate(getWeekEnd(selectedWeek))}`
+                : `Period: ${formatDate(selectedWeek)} - ${formatDate(getWeekEnd(selectedWeek))}`
               }
             </h3>
-            <p className="text-sm text-slate-400 mt-1">Released Payslips Only</p>
+            <p className="text-sm text-slate-400 mt-1">Released Payslips Only • Daily entries shown</p>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full">
               <thead className="bg-slate-700/50">
                 <tr>
-                  <th className="text-left py-3 px-4 font-semibold text-slate-300">Period</th>
+                  <th className="text-left py-3 px-4 font-semibold text-slate-300">Date</th>
                   <th className="text-left py-3 px-4 font-semibold text-slate-300">Time</th>
                   <th className="text-right py-3 px-4 font-semibold text-slate-300">Hours</th>
                   <th className="text-right py-3 px-4 font-semibold text-slate-300">Overtime</th>
@@ -351,9 +351,15 @@ export function PayrollHistory() {
                   <tr key={entry.id} className="hover:bg-slate-700/30 transition-colors">
                     <td className="py-3 px-4">
                       <div>
-                        <p className="font-medium text-white">
-                          {formatDate(entry.week_start)} - {formatDate(entry.week_end)}
-                        </p>
+                        {entry.week_start === entry.week_end ? (
+                          <p className="font-medium text-white">
+                            {formatDate(entry.week_start)}
+                          </p>
+                        ) : (
+                          <p className="font-medium text-white">
+                            {formatDate(entry.week_start)} - {formatDate(entry.week_end)}
+                          </p>
+                        )}
                       </div>
                     </td>
                     <td className="py-3 px-4">
@@ -406,12 +412,12 @@ export function PayrollHistory() {
           <h3 className="text-lg font-medium text-white mb-2">No Released Payslips</h3>
           <p className="text-slate-400">
             No released payroll records found for the selected {selectedDay ? 'day' : 'week'}. 
-            Payslips will appear here once an admin releases them.
+            Daily payslips will appear here once an admin releases them.
           </p>
           <div className="mt-4 bg-blue-900/20 p-4 rounded-lg border border-blue-800/50 max-w-md mx-auto">
             <p className="text-sm text-blue-400">
-              <strong>Note:</strong> Only payslips that have been officially released by an administrator will be visible here. 
-              Pending payslips are not shown to maintain payroll security.
+              <strong>Note:</strong> Each day you work will generate a separate payslip entry. 
+              Only payslips that have been officially released by an administrator will be visible here.
             </p>
           </div>
         </div>
