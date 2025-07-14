@@ -154,7 +154,7 @@ app.get('/api/user-hours-progress', authenticate, async (req, res) => {
     
     const requiredHours = parseFloat(userResult[0].required_hours) || 0;
     
-    // Get total worked hours for the user (only completed shifts)
+    // Get total worked hours for the user (only completed shifts + payslip adjustments)
     const [hoursResult] = await pool.execute(`
       SELECT 
         COALESCE(SUM(
@@ -168,7 +168,18 @@ app.get('/api/user-hours-progress', authenticate, async (req, res) => {
       WHERE user_id = ?
     `, [req.user.userId]);
     
-    const workedHours = parseFloat(hoursResult[0].total_hours) || 0;
+    // Also get hours from released payslips to ensure accuracy
+    const [payslipHours] = await pool.execute(`
+      SELECT COALESCE(SUM(total_hours), 0) as payslip_total_hours
+      FROM payslips 
+      WHERE user_id = ? AND status = 'released'
+    `, [req.user.userId]);
+    
+    // Use the higher value between time entries and payslips to account for admin adjustments
+    const timeEntryHours = parseFloat(hoursResult[0].total_hours) || 0;
+    const payslipTotalHours = parseFloat(payslipHours[0].payslip_total_hours) || 0;
+    const workedHours = Math.max(timeEntryHours, payslipTotalHours);
+    
     const remainingHours = Math.max(0, requiredHours - workedHours);
     const progressPercentage = requiredHours > 0 ? Math.min(100, (workedHours / requiredHours) * 100) : 0;
     

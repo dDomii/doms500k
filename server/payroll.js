@@ -599,6 +599,20 @@ export async function updatePayrollEntry(payslipId, updateData) {
     const formattedClockIn = clockIn ? formatDateTimeForMySQL(new Date(clockIn)) : null;
     const formattedClockOut = clockOut ? formatDateTimeForMySQL(new Date(clockOut)) : null;
 
+    // Get the payslip to find the user_id and update their worked hours
+    const [payslipResult] = await pool.execute(
+      'SELECT user_id, total_hours as old_total_hours FROM payslips WHERE id = ?',
+      [payslipId]
+    );
+    
+    if (payslipResult.length === 0) {
+      return { success: false, message: 'Payslip not found' };
+    }
+    
+    const userId = payslipResult[0].user_id;
+    const oldTotalHours = parseFloat(payslipResult[0].old_total_hours) || 0;
+    const newTotalHours = parseFloat(totalHours) || 0;
+    const hoursDifference = newTotalHours - oldTotalHours;
     await pool.execute(
       `UPDATE payslips SET 
        clock_in_time = ?, clock_out_time = ?, total_hours = ?, overtime_hours = ?, 
@@ -608,9 +622,35 @@ export async function updatePayrollEntry(payslipId, updateData) {
       [formattedClockIn, formattedClockOut, totalHours, overtimeHours, undertimeHours, baseSalary, overtimePay, undertimeDeduction, staffHouseDeduction, totalSalary, payslipId]
     );
 
+    // Update the user's worked hours in time_entries if there's a significant change
+    if (Math.abs(hoursDifference) > 0.01) { // Only update if difference is more than 0.01 hours
+      // Create an adjustment entry to reflect the change in progress tracker
+      const adjustmentDate = new Date().toISOString().split('T')[0];
+      const weekStart = getWeekStart(new Date());
+      
+      // Insert an adjustment entry
+      await pool.execute(
+        `INSERT INTO time_entries (user_id, clock_in, clock_out, date, week_start, overtime_requested, overtime_approved) 
+         VALUES (?, ?, ?, ?, ?, FALSE, NULL)`,
+        [
+          userId,
+          formattedClockIn || new Date().toISOString(),
+          formattedClockOut || new Date().toISOString(),
+          adjustmentDate,
+          weekStart
+        ]
+      );
+    }
     return { success: true };
   } catch (error) {
     console.error('Update payroll entry error:', error);
     return { success: false, message: 'Server error' };
   }
+}
+// Helper function to get week start
+function getWeekStart(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day;
+  return new Date(d.setDate(diff)).toISOString().split('T')[0];
 }
