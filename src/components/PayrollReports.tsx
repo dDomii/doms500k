@@ -434,7 +434,6 @@ export function PayrollReports() {
 
     const headers = [
       'Employee',
-      'Date',
       'Department',
       'Clock In',
       'Clock Out',
@@ -451,7 +450,6 @@ export function PayrollReports() {
 
     const rows = payrollData.map(entry => [
       entry.username,
-      formatDate(entry.week_start),
       entry.department,
       entry.clock_in_time ? new Date(entry.clock_in_time).toLocaleString() : 'N/A',
       entry.clock_out_time ? new Date(entry.clock_out_time).toLocaleString() : 'N/A',
@@ -729,7 +727,7 @@ export function PayrollReports() {
           <div className="bg-slate-800/90 backdrop-blur-sm rounded-xl p-4 shadow-lg border border-slate-700/50">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-slate-400">Total Employees</p>
+                <p className="text-sm text-slate-400">Total Payslips</p>
                 <p className="text-2xl font-bold text-white">{filteredPayrollData.length}</p>
               </div>
               <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/20 p-3 rounded-lg">
