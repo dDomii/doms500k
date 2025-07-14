@@ -194,47 +194,48 @@ export async function generatePayslipsForDateRange(startDate, endDate) {
 
 export async function generatePayslipsForSpecificDays(selectedDates, userIds = null) {
   try {
-    // Build date conditions for specific days
-    const dateConditions = selectedDates.map(() => 'DATE(te.clock_in) = ?').join(' OR ');
-    
-    let userCondition = '';
-    let queryParams = [...selectedDates];
-    
-    if (userIds && userIds.length > 0) {
-      userCondition = ` AND u.id IN (${userIds.map(() => '?').join(',')})`;
-      queryParams.push(...userIds);
-    }
-
-    // Get all users who have time entries on the selected dates
-    const [users] = await pool.execute(`
-      SELECT DISTINCT u.* FROM users u 
-      JOIN time_entries te ON u.id = te.user_id
-      WHERE u.active = TRUE AND (${dateConditions})${userCondition}
-      GROUP BY u.id
-    `, queryParams);
-
     const payslips = [];
+    
+    // Process each date separately to ensure individual payslips
+    for (const date of selectedDates) {
+      // Build date conditions for specific days
+      let userCondition = '';
+      let queryParams = [date];
+      
+      if (userIds && userIds.length > 0) {
+        userCondition = ` AND u.id IN (${userIds.map(() => '?').join(',')})`;
+        queryParams.push(...userIds);
+      }
 
-    for (const user of users) {
-      // Calculate payroll for the specific selected days
-      const payroll = await calculatePayrollForSpecificDays(user.id, selectedDates);
-      if (payroll && payroll.totalHours > 0) {
-        // Create a unique identifier for this payslip based on selected dates
-        const dateRange = `${selectedDates[0]}_to_${selectedDates[selectedDates.length - 1]}`;
-        
-        // Check if payslip already exists for this user and date combination
+      // Get all time entries for this specific date
+      const [timeEntries] = await pool.execute(`
+        SELECT te.*, u.username, u.department, u.staff_house
+        FROM time_entries te
+        JOIN users u ON te.user_id = u.id
+        WHERE u.active = TRUE AND DATE(te.clock_in) = ? AND te.clock_out IS NOT NULL${userCondition}
+        ORDER BY u.id
+      `, queryParams);
+
+      for (const entry of timeEntries) {
+        // Check if payslip already exists for this user and specific date
         const [existing] = await pool.execute(
           'SELECT id FROM payslips WHERE user_id = ? AND week_start = ? AND week_end = ?',
-          [user.id, selectedDates[0], selectedDates[selectedDates.length - 1]]
+          [entry.user_id, date, date]
         );
 
-        if (existing.length === 0) {
+        if (existing.length > 0) {
+          continue; // Skip if payslip already exists for this day
+        }
+
+        // Calculate payroll for this specific entry
+        const payroll = await calculatePayrollForSingleEntry(entry);
+        if (payroll && payroll.totalHours > 0) {
           const [result] = await pool.execute(
             `INSERT INTO payslips (user_id, week_start, week_end, total_hours, overtime_hours, 
              undertime_hours, base_salary, overtime_pay, undertime_deduction, staff_house_deduction, 
              total_salary, clock_in_time, clock_out_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-              user.id, selectedDates[0], selectedDates[selectedDates.length - 1],
+              entry.user_id, date, date,
               payroll.totalHours, payroll.overtimeHours, payroll.undertimeHours,
               payroll.baseSalary, payroll.overtimePay, payroll.undertimeDeduction,
               payroll.staffHouseDeduction, payroll.totalSalary,
@@ -244,9 +245,9 @@ export async function generatePayslipsForSpecificDays(selectedDates, userIds = n
 
           payslips.push({
             id: result.insertId,
-            user: user.username,
-            department: user.department,
-            selectedDates: selectedDates,
+            user: entry.username,
+            department: entry.department,
+            date: date,
             ...payroll
           });
         }
