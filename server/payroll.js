@@ -15,6 +15,8 @@ async function getBreaktimeSetting() {
 
 export async function calculateDailyPayroll(userId, date) {
   try {
+    console.log(`Calculating payroll for user ${userId} on date ${date}`);
+    
     const breaktimeEnabled = await getBreaktimeSetting();
     const standardHoursPerDay = 8.5; // Always 8.5 hours for ₱200 base pay
     const maxBasePay = 200; // Cap base pay at ₱200
@@ -25,6 +27,8 @@ export async function calculateDailyPayroll(userId, date) {
       'SELECT * FROM time_entries WHERE user_id = ? AND DATE(clock_in) = ? ORDER BY clock_in',
       [userId, date]
     );
+
+    console.log(`Found ${entries.length} time entries for user ${userId} on ${date}`);
 
     const [user] = await pool.execute(
       'SELECT * FROM users WHERE id = ?',
@@ -43,11 +47,14 @@ export async function calculateDailyPayroll(userId, date) {
     let lastClockOut = null;
 
     entries.forEach(entry => {
+      console.log(`Processing entry ${entry.id}: clock_in=${entry.clock_in}, clock_out=${entry.clock_out}`);
+      
       const clockIn = new Date(entry.clock_in);
       let clockOut = entry.clock_out ? new Date(entry.clock_out) : null;
 
       // Skip entries without clock_out when generating payroll
       if (!clockOut) {
+        console.log(`Skipping entry ${entry.id} - no clock_out time`);
         return; // Skip this entry
       }
 
@@ -65,8 +72,11 @@ export async function calculateDailyPayroll(userId, date) {
       // Calculate worked hours from 7:00 AM onwards only
       let workedHours = Math.max(0, (clockOut.getTime() - effectiveClockIn.getTime()) / (1000 * 60 * 60));
       
+      console.log(`Entry ${entry.id}: workedHours=${workedHours}`);
+      
       // Only count positive worked hours
       if (workedHours <= 0) {
+        console.log(`Skipping entry ${entry.id} - no valid work time`);
         return; // Skip if no valid work time
       }
       
@@ -99,6 +109,8 @@ export async function calculateDailyPayroll(userId, date) {
       totalHours += dailyBaseHours;
     });
 
+    console.log(`Final calculation for user ${userId}: totalHours=${totalHours}, overtimeHours=${overtimeHours}, undertimeHours=${undertimeHours}`);
+
     // Calculate base salary (capped at ₱200 for 8.5 hours)
     const baseSalary = Math.min(totalHours * hourlyRate, maxBasePay);
     const overtimePay = overtimeHours * 35;
@@ -107,6 +119,7 @@ export async function calculateDailyPayroll(userId, date) {
     
     const totalSalary = baseSalary + overtimePay - undertimeDeduction - staffHouseDeduction;
 
+    const result = {
     return {
       totalHours,
       overtimeHours,
@@ -119,6 +132,9 @@ export async function calculateDailyPayroll(userId, date) {
       clockInTime: firstClockIn ? formatDateTimeForMySQL(firstClockIn) : null,
       clockOutTime: lastClockOut ? formatDateTimeForMySQL(lastClockOut) : null
     };
+    
+    console.log(`Payroll calculation result for user ${userId}:`, result);
+    return result;
   } catch (error) {
     console.error('Calculate daily payroll error:', error);
     return null;
@@ -127,6 +143,8 @@ export async function calculateDailyPayroll(userId, date) {
 
 export async function generatePayslipsForSpecificDays(selectedDates, userIds = null) {
   try {
+    console.log('Generating payslips for specific days:', selectedDates, 'userIds:', userIds);
+    
     // Build date conditions for specific days
     const dateConditions = selectedDates.map(() => 'DATE(te.clock_in) = ?').join(' OR ');
     
@@ -138,21 +156,34 @@ export async function generatePayslipsForSpecificDays(selectedDates, userIds = n
       queryParams.push(...userIds);
     }
 
-    // Get all users who have time entries on the selected dates
-    const [users] = await pool.execute(`
+    const query = `
       SELECT DISTINCT u.* FROM users u 
       JOIN time_entries te ON u.id = te.user_id
       WHERE u.active = TRUE AND (${dateConditions})${userCondition}
       GROUP BY u.id
-    `, queryParams);
+    `;
+    
+    console.log('Executing query:', query, 'with params:', queryParams);
+
+    // Get all users who have time entries on the selected dates
+    const [users] = await pool.execute(query, queryParams);
+    
+    console.log(`Found ${users.length} users with time entries`);
 
     const payslips = [];
 
     for (const user of users) {
+      console.log(`Processing user: ${user.username} (ID: ${user.id})`);
+      
       // Generate payslip for each selected date
       for (const date of selectedDates) {
+        console.log(`Generating payslip for ${user.username} on ${date}`);
+        
         const payroll = await calculateDailyPayroll(user.id, date);
+        
         if (payroll && payroll.totalHours > 0) {
+          console.log(`Valid payroll calculated for ${user.username} on ${date}:`, payroll);
+          
           // Check if payslip already exists for this user and date
           const [existing] = await pool.execute(
             'SELECT id FROM payslips WHERE user_id = ? AND week_start = ? AND week_end = ?',
@@ -160,6 +191,8 @@ export async function generatePayslipsForSpecificDays(selectedDates, userIds = n
           );
 
           if (existing.length === 0) {
+            console.log(`Creating new payslip for ${user.username} on ${date}`);
+            
             const [result] = await pool.execute(
               `INSERT INTO payslips (user_id, week_start, week_end, total_hours, overtime_hours, 
                undertime_hours, base_salary, overtime_pay, undertime_deduction, staff_house_deduction, 
@@ -180,11 +213,18 @@ export async function generatePayslipsForSpecificDays(selectedDates, userIds = n
               date: date,
               ...payroll
             });
+            
+            console.log(`Successfully created payslip ID ${result.insertId} for ${user.username}`);
+          } else {
+            console.log(`Payslip already exists for ${user.username} on ${date}`);
           }
+        } else {
+          console.log(`No valid payroll data for ${user.username} on ${date} (totalHours: ${payroll?.totalHours || 0})`);
         }
       }
     }
 
+    console.log(`Generated ${payslips.length} payslips total`);
     return payslips;
   } catch (error) {
     console.error('Generate payslips for specific days error:', error);
