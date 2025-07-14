@@ -409,7 +409,7 @@ export function PayrollReports() {
       entry.username,
       entry.department,
       Number(entry.total_hours).toFixed(2),
-      entry.overtime_hours.toFixed(2),
+      Number(entry.overtime_hours).toFixed(2),
       `₱${entry.base_salary.toFixed(2)}`,
       `₱${entry.overtime_pay.toFixed(2)}`,
       `₱${entry.undertime_deduction.toFixed(2)}`,
