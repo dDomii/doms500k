@@ -16,7 +16,9 @@ async function getBreaktimeSetting() {
 export async function calculateWeeklyPayroll(userId, weekStart) {
   try {
     const breaktimeEnabled = await getBreaktimeSetting();
-    const standardHoursPerDay = breaktimeEnabled ? 8.5 : 8;
+    const standardHoursPerDay = 8.5; // Always 8.5 hours for ₱200 base pay
+    const maxBasePay = 200; // Cap base pay at ₱200
+    const hourlyRate = 200 / 8.5; // ₱23.53 per hour
     
     const [entries] = await pool.execute(
       'SELECT * FROM time_entries WHERE user_id = ? AND week_start = ? ORDER BY clock_in',
@@ -48,6 +50,24 @@ export async function calculateWeeklyPayroll(userId, weekStart) {
         return; // Skip this entry
       }
 
+      // Define shift start time (7:00 AM)
+      const shiftStart = new Date(clockIn);
+      shiftStart.setHours(7, 0, 0, 0);
+      
+      // Define shift end time (3:30 PM)
+      const shiftEnd = new Date(clockIn);
+      shiftEnd.setHours(15, 30, 0, 0);
+      
+      // Adjust clock in time if before 7:00 AM (work doesn't count before 7:00 AM)
+      const effectiveClockIn = clockIn < shiftStart ? shiftStart : clockIn;
+      
+      // Calculate worked hours from effective clock in time
+      const workedHours = (clockOut - effectiveClockIn) / (1000 * 60 * 60);
+      
+      // Only count positive worked hours
+      if (workedHours <= 0) {
+        return; // Skip if no valid work time
+      }
       const workedHours = (clockOut - clockIn) / (1000 * 60 * 60);
 
       // Track first clock in and last clock out
@@ -58,10 +78,7 @@ export async function calculateWeeklyPayroll(userId, weekStart) {
         lastClockOut = clockOut;
       }
 
-      // Check for late clock in (after 7:00 AM) - this counts as undertime
-      const shiftStart = new Date(clockIn);
-      shiftStart.setHours(7, 0, 0, 0);
-      
+      // Check for late clock in (after 7:00 AM)
       if (clockIn > shiftStart) {
         const lateHours = (clockIn - shiftStart) / (1000 * 60 * 60);
         undertimeHours += lateHours;
@@ -69,26 +86,20 @@ export async function calculateWeeklyPayroll(userId, weekStart) {
 
       // Handle overtime calculation
       if (entry.overtime_requested && entry.overtime_approved) {
-        const shiftEndTime = new Date(clockIn);
-        shiftEndTime.setHours(15, 30, 0, 0);
-        
-        if (clockOut > shiftEndTime) {
-          // Calculate overtime hours (30 minutes grace period after 3:30 PM = 4:00 PM)
-          const overtimeStart = new Date(shiftEndTime.getTime() + 30 * 60 * 1000); // 4:00 PM
-          const overtime = Math.max(0, (clockOut - overtimeStart) / (1000 * 60 * 60));
+        if (clockOut > shiftEnd) {
+          // Overtime starts immediately at 3:30 PM when approved
+          const overtime = Math.max(0, (clockOut - shiftEnd) / (1000 * 60 * 60));
           overtimeHours += overtime;
-          totalHours += workedHours; // Count actual worked hours
-        } else {
-          totalHours += workedHours; // Count actual worked hours
         }
-      } else {
-        totalHours += workedHours; // Count actual worked hours
       }
+      
+      // Add to total hours (capped at 8.5 hours per day for base pay calculation)
+      const dailyBaseHours = Math.min(workedHours, standardHoursPerDay);
+      totalHours += dailyBaseHours;
     });
 
-    // Calculate based on actual hours worked
-    const hourlyRate = breaktimeEnabled ? (200 / 8.5) : 25; // Adjust hourly rate based on breaktime
-    const baseSalary = totalHours * hourlyRate;
+    // Calculate base salary (capped at ₱200 for 8.5 hours)
+    const baseSalary = Math.min(totalHours * hourlyRate, maxBasePay);
     const overtimePay = overtimeHours * 35;
     const undertimeDeduction = undertimeHours * hourlyRate;
     const staffHouseDeduction = userData.staff_house ? 250 : 0;
@@ -251,8 +262,9 @@ export async function generatePayslipsForSpecificDays(selectedDates, userIds = n
 
 export async function calculatePayrollForSpecificDays(userId, selectedDates) {
   try {
-    const breaktimeEnabled = await getBreaktimeSetting();
-    const hourlyRate = breaktimeEnabled ? (200 / 8.5) : 25;
+    const standardHoursPerDay = 8.5; // Always 8.5 hours for ₱200 base pay
+    const maxBasePay = 200; // Cap base pay at ₱200
+    const hourlyRate = 200 / 8.5; // ₱23.53 per hour
     
     // Build date conditions for specific days
     const dateConditions = selectedDates.map(() => 'DATE(clock_in) = ?').join(' OR ');
@@ -287,6 +299,24 @@ export async function calculatePayrollForSpecificDays(userId, selectedDates) {
         return; // Skip this entry
       }
 
+      // Define shift start time (7:00 AM)
+      const shiftStart = new Date(clockIn);
+      shiftStart.setHours(7, 0, 0, 0);
+      
+      // Define shift end time (3:30 PM)
+      const shiftEnd = new Date(clockIn);
+      shiftEnd.setHours(15, 30, 0, 0);
+      
+      // Adjust clock in time if before 7:00 AM (work doesn't count before 7:00 AM)
+      const effectiveClockIn = clockIn < shiftStart ? shiftStart : clockIn;
+      
+      // Calculate worked hours from effective clock in time
+      const workedHours = (clockOut - effectiveClockIn) / (1000 * 60 * 60);
+      
+      // Only count positive worked hours
+      if (workedHours <= 0) {
+        return; // Skip if no valid work time
+      }
       const workedHours = (clockOut - clockIn) / (1000 * 60 * 60);
 
       // Track first clock in and last clock out
@@ -298,9 +328,6 @@ export async function calculatePayrollForSpecificDays(userId, selectedDates) {
       }
 
       // Check for late clock in (after 7:00 AM)
-      const shiftStart = new Date(clockIn);
-      shiftStart.setHours(7, 0, 0, 0);
-      
       if (clockIn > shiftStart) {
         const lateHours = (clockIn - shiftStart) / (1000 * 60 * 60);
         undertimeHours += lateHours;
@@ -308,25 +335,20 @@ export async function calculatePayrollForSpecificDays(userId, selectedDates) {
 
       // Handle overtime calculation
       if (entry.overtime_requested && entry.overtime_approved) {
-        const shiftEndTime = new Date(clockIn);
-        shiftEndTime.setHours(15, 30, 0, 0);
-        
-        if (clockOut > shiftEndTime) {
-          // Calculate overtime hours (subtract 30 minutes grace period)
-          const overtimeStart = new Date(Math.max(shiftEndTime.getTime() + 30 * 60 * 1000, shiftEndTime.getTime()));
-          const overtime = Math.max(0, (clockOut - overtimeStart) / (1000 * 60 * 60));
+        if (clockOut > shiftEnd) {
+          // Overtime starts immediately at 3:30 PM when approved
+          const overtime = Math.max(0, (clockOut - shiftEnd) / (1000 * 60 * 60));
           overtimeHours += overtime;
-          totalHours += workedHours; // Count actual worked hours
-        } else {
-          totalHours += workedHours; // Count actual worked hours
         }
-      } else {
-        totalHours += workedHours; // Count actual worked hours
       }
+      
+      // Add to total hours (capped at 8.5 hours per day for base pay calculation)
+      const dailyBaseHours = Math.min(workedHours, standardHoursPerDay);
+      totalHours += dailyBaseHours;
     });
 
-    // Calculate based on actual hours worked
-    const baseSalary = totalHours * hourlyRate;
+    // Calculate base salary (capped at ₱200 for 8.5 hours)
+    const baseSalary = Math.min(totalHours * hourlyRate, maxBasePay);
     const overtimePay = overtimeHours * 35;
     const undertimeDeduction = undertimeHours * hourlyRate;
     
@@ -356,8 +378,9 @@ export async function calculatePayrollForSpecificDays(userId, selectedDates) {
 
 export async function calculatePayrollForDateRange(userId, startDate, endDate) {
   try {
-    const breaktimeEnabled = await getBreaktimeSetting();
-    const hourlyRate = breaktimeEnabled ? (200 / 8.5) : 25;
+    const standardHoursPerDay = 8.5; // Always 8.5 hours for ₱200 base pay
+    const maxBasePay = 200; // Cap base pay at ₱200
+    const hourlyRate = 200 / 8.5; // ₱23.53 per hour
     
     const [entries] = await pool.execute(
       'SELECT * FROM time_entries WHERE user_id = ? AND DATE(clock_in) BETWEEN ? AND ? ORDER BY clock_in',
@@ -389,6 +412,24 @@ export async function calculatePayrollForDateRange(userId, startDate, endDate) {
         return; // Skip this entry
       }
 
+      // Define shift start time (7:00 AM)
+      const shiftStart = new Date(clockIn);
+      shiftStart.setHours(7, 0, 0, 0);
+      
+      // Define shift end time (3:30 PM)
+      const shiftEnd = new Date(clockIn);
+      shiftEnd.setHours(15, 30, 0, 0);
+      
+      // Adjust clock in time if before 7:00 AM (work doesn't count before 7:00 AM)
+      const effectiveClockIn = clockIn < shiftStart ? shiftStart : clockIn;
+      
+      // Calculate worked hours from effective clock in time
+      const workedHours = (clockOut - effectiveClockIn) / (1000 * 60 * 60);
+      
+      // Only count positive worked hours
+      if (workedHours <= 0) {
+        return; // Skip if no valid work time
+      }
       const workedHours = (clockOut - clockIn) / (1000 * 60 * 60);
 
       // Track first clock in and last clock out
@@ -400,37 +441,28 @@ export async function calculatePayrollForDateRange(userId, startDate, endDate) {
       }
 
       // Check for late clock in (after 7:00 AM)
-      const shiftStart = new Date(clockIn);
-      shiftStart.setHours(7, 0, 0, 0);
-      
       if (clockIn > shiftStart) {
         const lateHours = (clockIn - shiftStart) / (1000 * 60 * 60);
         undertimeHours += lateHours;
       }
 
-      // NO EARLY CLOCK OUT DEDUCTION - removed this logic
 
       // Handle overtime calculation
       if (entry.overtime_requested && entry.overtime_approved) {
-        const shiftEndTime = new Date(clockIn);
-        shiftEndTime.setHours(15, 30, 0, 0);
-        
-        if (clockOut > shiftEndTime) {
-          // Calculate overtime hours (subtract 30 minutes grace period)
-          const overtimeStart = new Date(Math.max(shiftEndTime.getTime() + 30 * 60 * 1000, shiftEndTime.getTime()));
-          const overtime = Math.max(0, (clockOut - overtimeStart) / (1000 * 60 * 60));
+        if (clockOut > shiftEnd) {
+          // Overtime starts immediately at 3:30 PM when approved
+          const overtime = Math.max(0, (clockOut - shiftEnd) / (1000 * 60 * 60));
           overtimeHours += overtime;
-          totalHours += workedHours; // Count actual worked hours
-        } else {
-          totalHours += workedHours; // Count actual worked hours
         }
-      } else {
-        totalHours += workedHours; // Count actual worked hours
       }
+      
+      // Add to total hours (capped at 8.5 hours per day for base pay calculation)
+      const dailyBaseHours = Math.min(workedHours, standardHoursPerDay);
+      totalHours += dailyBaseHours;
     });
 
-    // Calculate based on actual hours worked
-    const baseSalary = totalHours * hourlyRate;
+    // Calculate base salary (capped at ₱200 for 8.5 hours)
+    const baseSalary = Math.min(totalHours * hourlyRate, maxBasePay);
     const overtimePay = overtimeHours * 35;
     const undertimeDeduction = undertimeHours * hourlyRate;
     
