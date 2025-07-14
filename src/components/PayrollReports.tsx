@@ -3,20 +3,19 @@ import { useAuth } from '../contexts/AuthContext';
 import { 
   Calendar, 
   PhilippinePeso, 
-  Users, 
   Download, 
+  Users, 
+  Clock, 
+  TrendingUp, 
   FileText, 
   Edit3, 
   Save, 
   X, 
   AlertTriangle,
-  Eye,
-  Clock,
-  CheckCircle,
-  RefreshCw,
-  Play,
   Filter,
-  Search
+  Search,
+  Eye,
+  CheckCircle
 } from 'lucide-react';
 
 interface PayrollEntry {
@@ -39,42 +38,43 @@ interface PayrollEntry {
   status: string;
 }
 
+interface User {
+  id: number;
+  username: string;
+  department: string;
+  active: boolean;
+}
+
 interface AvailableDate {
   entry_date: string;
   user_count: number;
   total_entries: number;
 }
 
-interface TimeEntry {
-  id: number;
-  user_id: number;
-  username: string;
-  department: string;
-  clock_in: string;
-  clock_out: string;
-  overtime_requested: boolean;
-  overtime_approved: boolean;
-  overtime_note: string;
-}
-
-type GenerationMode = 'specific-dates' | 'date-range' | 'weekly';
+const DEPARTMENTS = [
+  'Human Resource',
+  'Marketing', 
+  'Finance',
+  'Account Management',
+  'System Automation',
+  'Sales',
+  'Training',
+  'IT Department'
+];
 
 export function PayrollReports() {
   const [payrollData, setPayrollData] = useState<PayrollEntry[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [availableDates, setAvailableDates] = useState<AvailableDate[]>([]);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [weekStart, setWeekStart] = useState('');
-  const [generationMode, setGenerationMode] = useState<GenerationMode>('specific-dates');
+  const [selectedUsers, setSelectedUsers] = useState<number[]>([]);
+  const [selectedDepartment, setSelectedDepartment] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [releasing, setReleasing] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [editingEntry, setEditingEntry] = useState<PayrollEntry | null>(null);
-  const [showPreviewModal, setShowPreviewModal] = useState(false);
-  const [previewEntries, setPreviewEntries] = useState<TimeEntry[]>([]);
-  const [previewDate, setPreviewDate] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [departmentFilter, setDepartmentFilter] = useState('');
   const [editForm, setEditForm] = useState({
     clockIn: '',
     clockOut: '',
@@ -88,97 +88,102 @@ export function PayrollReports() {
   });
   const { token } = useAuth();
 
-  const DEPARTMENTS = [
-    'Human Resource',
-    'Marketing', 
-    'Finance',
-    'Account Management',
-    'System Automation',
-    'Sales',
-    'Training',
-    'IT Department'
-  ];
-
   useEffect(() => {
+    fetchUsers();
     fetchAvailableDates();
-    // Set current week as default
-    const today = new Date();
-    const currentWeekStart = getWeekStart(today);
-    setWeekStart(currentWeekStart);
   }, []);
 
-  const getWeekStart = (date: Date) => {
-    const d = new Date(date);
-    const day = d.getDay();
-    const diff = d.getDate() - day;
-    return new Date(d.setDate(diff)).toISOString().split('T')[0];
+  useEffect(() => {
+    if (selectedDates.length > 0) {
+      fetchPayrollData();
+    } else {
+      setPayrollData([]);
+    }
+  }, [selectedDates, selectedUsers]);
+
+  const fetchUsers = async () => {
+    try {
+      const response = await fetch('http://192.168.100.60:3001/api/users', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      setUsers(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      setUsers([]);
+    }
   };
 
   const fetchAvailableDates = async () => {
     try {
-      const response = await fetch('http://192.168.100.60:3001/api/available-dates', {
+      const userIdsParam = selectedUsers.length > 0 ? `?userIds=${selectedUsers.join(',')}` : '';
+      const response = await fetch(`http://192.168.100.60:3001/api/available-dates${userIdsParam}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();
-      setAvailableDates(data);
+      setAvailableDates(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Error fetching available dates:', error);
+      setAvailableDates([]);
     }
   };
 
-  const previewTimeEntries = async (date: string) => {
+  const fetchPayrollData = async () => {
+    if (selectedDates.length === 0) {
+      setPayrollData([]);
+      return;
+    }
+
+    setLoading(true);
     try {
-      setPreviewDate(date);
-      const response = await fetch(`http://192.168.100.60:3001/api/time-entries-for-date?date=${date}`, {
+      const selectedDatesParam = selectedDates.join(',');
+      const response = await fetch(`http://192.168.100.60:3001/api/payroll-report?selectedDates=${selectedDatesParam}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await response.json();
-      setPreviewEntries(data);
-      setShowPreviewModal(true);
+      
+      console.log('Payroll data received:', await response.clone().json());
+      
+      if (response.ok) {
+        const data = await response.json();
+        setPayrollData(Array.isArray(data) ? data : []);
+      } else {
+        const errorData = await response.json();
+        console.error('Error response:', errorData);
+        setPayrollData([]);
+      }
     } catch (error) {
-      console.error('Error fetching time entries:', error);
+      console.error('Error fetching payroll data:', error);
+      setPayrollData([]);
     }
+    setLoading(false);
   };
 
   const generatePayslips = async () => {
+    if (selectedDates.length === 0) {
+      alert('Please select at least one date');
+      return;
+    }
+
     setGenerating(true);
     try {
-      let requestBody: any = {};
-      
-      if (generationMode === 'specific-dates' && selectedDates.length > 0) {
-        requestBody.selectedDates = selectedDates;
-      } else if (generationMode === 'date-range' && startDate && endDate) {
-        requestBody.startDate = startDate;
-        requestBody.endDate = endDate;
-      } else if (generationMode === 'weekly' && weekStart) {
-        requestBody.weekStart = weekStart;
-      } else {
-        alert('Please select dates or date range for payslip generation');
-        setGenerating(false);
-        return;
-      }
-
-      console.log('Generating payslips with:', requestBody);
-
       const response = await fetch('http://192.168.100.60:3001/api/payslips/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({
+          selectedDates,
+          userIds: selectedUsers.length > 0 ? selectedUsers : null
+        }),
       });
 
       const data = await response.json();
-      
-      if (response.ok) {
-        console.log('Generated payslips:', data);
+      if (Array.isArray(data) && data.length > 0) {
         alert(`Successfully generated ${data.length} payslips!`);
-        // Refresh the payroll data
-        await fetchPayrollData();
+        fetchPayrollData();
       } else {
-        console.error('Generation failed:', data);
-        alert(data.message || 'Failed to generate payslips');
+        alert('No payslips were generated. Check if users have valid time entries for the selected dates.');
       }
     } catch (error) {
       console.error('Error generating payslips:', error);
@@ -187,49 +192,45 @@ export function PayrollReports() {
     setGenerating(false);
   };
 
-  const fetchPayrollData = async () => {
-    if ((!selectedDates.length && generationMode === 'specific-dates') && 
-        (!startDate || !endDate) && generationMode === 'date-range' && 
-        (!weekStart && generationMode === 'weekly')) {
+  const releasePayslips = async () => {
+    if (selectedDates.length === 0) {
+      alert('Please select dates to release payslips');
       return;
     }
 
-    setLoading(true);
+    const confirmRelease = window.confirm(
+      `Are you sure you want to release payslips for the selected dates? This action cannot be undone.`
+    );
+
+    if (!confirmRelease) return;
+
+    setReleasing(true);
     try {
-      let url = 'http://192.168.100.60:3001/api/payroll-report';
-      const params = new URLSearchParams();
-
-      if (generationMode === 'specific-dates' && selectedDates.length > 0) {
-        params.append('selectedDates', selectedDates.join(','));
-      } else if (generationMode === 'date-range' && startDate && endDate) {
-        params.append('startDate', startDate);
-        params.append('endDate', endDate);
-      } else if (generationMode === 'weekly' && weekStart) {
-        params.append('weekStart', weekStart);
-      }
-
-      if (params.toString()) {
-        url += `?${params.toString()}`;
-      }
-
-      console.log('Fetching payroll data from:', url);
-
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
+      const response = await fetch('http://192.168.100.60:3001/api/payslips/release', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          selectedDates,
+          userIds: selectedUsers.length > 0 ? selectedUsers : null
+        }),
       });
-      const data = await response.json();
-      console.log('Payroll data received:', data);
-      setPayrollData(data);
-    } catch (error) {
-      console.error('Error fetching payroll data:', error);
-      setPayrollData([]);
-    }
-    setLoading(false);
-  };
 
-  useEffect(() => {
-    fetchPayrollData();
-  }, [selectedDates, startDate, endDate, weekStart, generationMode]);
+      const data = await response.json();
+      if (data.success) {
+        alert(data.message || 'Payslips released successfully!');
+        fetchPayrollData();
+      } else {
+        alert(data.message || 'Failed to release payslips');
+      }
+    } catch (error) {
+      console.error('Error releasing payslips:', error);
+      alert('Failed to release payslips');
+    }
+    setReleasing(false);
+  };
 
   const handleDateToggle = (date: string) => {
     setSelectedDates(prev => 
@@ -239,7 +240,15 @@ export function PayrollReports() {
     );
   };
 
-  const handleEditStart = (entry: PayrollEntry) => {
+  const handleUserToggle = (userId: number) => {
+    setSelectedUsers(prev => 
+      prev.includes(userId) 
+        ? prev.filter(id => id !== userId)
+        : [...prev, userId]
+    );
+  };
+
+  const handleEditEntry = (entry: PayrollEntry) => {
     setEditingEntry(entry);
     setEditForm({
       clockIn: entry.clock_in_time ? new Date(entry.clock_in_time).toISOString().slice(0, 16) : '',
@@ -252,6 +261,7 @@ export function PayrollReports() {
       undertimeDeduction: entry.undertime_deduction,
       staffHouseDeduction: entry.staff_house_deduction
     });
+    setShowEditModal(true);
   };
 
   const calculateFromTimes = () => {
@@ -310,7 +320,7 @@ export function PayrollReports() {
     }));
   };
 
-  const handleEditSave = async () => {
+  const saveEditedEntry = async () => {
     if (!editingEntry) return;
 
     try {
@@ -325,8 +335,9 @@ export function PayrollReports() {
 
       const data = await response.json();
       if (data.success) {
-        await fetchPayrollData();
+        setShowEditModal(false);
         setEditingEntry(null);
+        fetchPayrollData();
         alert('Payroll entry updated successfully!');
       } else {
         alert(data.message || 'Failed to update payroll entry');
@@ -337,63 +348,13 @@ export function PayrollReports() {
     }
   };
 
-  const releasePayslips = async () => {
-    if (generationMode === 'specific-dates' && selectedDates.length === 0) {
-      alert('Please select dates to release payslips');
-      return;
-    }
-
-    if (generationMode === 'date-range' && (!startDate || !endDate)) {
-      alert('Please select start and end dates');
-      return;
-    }
-
-    if (generationMode === 'weekly' && !weekStart) {
-      alert('Please select a week');
-      return;
-    }
-
-    try {
-      let requestBody: any = {};
-      
-      if (generationMode === 'specific-dates') {
-        requestBody.selectedDates = selectedDates;
-      } else if (generationMode === 'date-range') {
-        requestBody.startDate = startDate;
-        requestBody.endDate = endDate;
-      } else if (generationMode === 'weekly') {
-        requestBody.weekStart = weekStart;
-      }
-
-      const response = await fetch('http://192.168.100.60:3001/api/payslips/release', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      const data = await response.json();
-      if (data.success) {
-        alert(data.message);
-        await fetchPayrollData();
-      } else {
-        alert(data.message || 'Failed to release payslips');
-      }
-    } catch (error) {
-      console.error('Error releasing payslips:', error);
-      alert('Failed to release payslips');
-    }
-  };
-
   const exportToCSV = () => {
-    if (payrollData.length === 0) return;
+    if (!Array.isArray(payrollData) || payrollData.length === 0) return;
 
     const headers = [
+      'Date',
       'Employee',
       'Department',
-      'Date',
       'Clock In',
       'Clock Out',
       'Total Hours',
@@ -408,11 +369,11 @@ export function PayrollReports() {
     ];
 
     const rows = payrollData.map(entry => [
+      entry.week_start,
       entry.username,
       entry.department,
-      entry.week_start === entry.week_end ? entry.week_start : `${entry.week_start} to ${entry.week_end}`,
-      entry.clock_in_time ? new Date(entry.clock_in_time).toLocaleString() : 'N/A',
-      entry.clock_out_time ? new Date(entry.clock_out_time).toLocaleString() : 'N/A',
+      entry.clock_in_time ? new Date(entry.clock_in_time).toLocaleTimeString() : 'N/A',
+      entry.clock_out_time ? new Date(entry.clock_out_time).toLocaleTimeString() : 'N/A',
       entry.total_hours,
       entry.overtime_hours,
       entry.undertime_hours,
@@ -431,12 +392,13 @@ export function PayrollReports() {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `payroll_report_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `payroll_report_${selectedDates.join('_')}.csv`;
     link.click();
   };
 
   const formatCurrency = (amount: number) => {
-    return `₱${amount.toFixed(2)}`;
+    const numAmount = typeof amount === 'number' ? amount : parseFloat(amount) || 0;
+    return `₱${numAmount.toFixed(2)}`;
   };
 
   const formatDate = (dateString: string) => {
@@ -455,49 +417,38 @@ export function PayrollReports() {
     });
   };
 
-  // Filter available dates based on search
-  const filteredAvailableDates = availableDates.filter(date => 
-    date.entry_date.includes(searchTerm) ||
-    formatDate(date.entry_date).toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
   // Filter payroll data based on search and department
-  if (payrollData && typeof payrollData === 'object') {
-  const payrollArray = Object.values(payrollData);
-  const filteredPayrollData = payrollArray.filter(entry => {
+  const filteredPayrollData = Array.isArray(payrollData) ? payrollData.filter(entry => {
     const matchesSearch = entry.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          entry.department.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesDepartment = departmentFilter === '' || entry.department === departmentFilter;
+                         entry.department.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesDepartment = selectedDepartment === '' || entry.department === selectedDepartment;
     return matchesSearch && matchesDepartment;
-  });
-} else {
-  console.error('payrollData is not an object:', payrollData);
-}
+  }) : [];
 
-  const totalSalary = filteredPayrollData.reduce((sum, entry) => sum + entry.total_salary, 0);
-  const totalHours = filteredPayrollData.reduce((sum, entry) => sum + entry.total_hours, 0);
-  const pendingCount = filteredPayrollData.filter(entry => entry.status === 'pending').length;
-  const releasedCount = filteredPayrollData.filter(entry => entry.status === 'released').length;
+  // Filter users based on department
+  const filteredUsers = Array.isArray(users) ? users.filter(user => {
+    const matchesDepartment = selectedDepartment === '' || user.department === selectedDepartment;
+    return user.active && matchesDepartment;
+  }) : [];
+
+  // Calculate statistics
+  const totalPayslips = filteredPayrollData.length;
+  const totalSalary = filteredPayrollData.reduce((sum, entry) => sum + (parseFloat(entry.total_salary) || 0), 0);
+  const totalHours = filteredPayrollData.reduce((sum, entry) => sum + (parseFloat(entry.total_hours) || 0), 0);
+  const totalOvertimeHours = filteredPayrollData.reduce((sum, entry) => sum + (parseFloat(entry.overtime_hours) || 0), 0);
 
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
         <div>
           <h2 className="text-2xl font-bold text-white">Payroll Management</h2>
-          <p className="text-slate-400">Generate and manage employee payslips</p>
+          <p className="text-slate-400">Generate and manage daily payslips for employees</p>
         </div>
         <div className="flex items-center gap-4">
-          <button
-            onClick={fetchAvailableDates}
-            className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:from-blue-600 hover:to-blue-700 transition-all duration-200 flex items-center gap-2 shadow-lg"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Refresh
-          </button>
           {filteredPayrollData.length > 0 && (
             <button
               onClick={exportToCSV}
-              className="bg-gradient-to-r from-emerald-500 to-green-600 text-white px-4 py-2 rounded-lg font-medium hover:from-emerald-600 hover:to-green-700 transition-all duration-200 flex items-center gap-2 shadow-lg"
+              className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:from-blue-600 hover:to-blue-700 transition-all duration-200 flex items-center gap-2 shadow-lg"
             >
               <Download className="w-4 h-4" />
               Export CSV
@@ -506,204 +457,13 @@ export function PayrollReports() {
         </div>
       </div>
 
-      {/* Generation Mode Selector */}
-      <div className="bg-slate-800/90 backdrop-blur-sm rounded-xl p-6 mb-6 shadow-lg border border-slate-700/50">
-        <h3 className="text-lg font-semibold text-white mb-4">Payslip Generation</h3>
-        
-        <div className="grid md:grid-cols-3 gap-4 mb-6">
-          <button
-            onClick={() => setGenerationMode('specific-dates')}
-            className={`p-4 rounded-lg border transition-all duration-200 ${
-              generationMode === 'specific-dates'
-                ? 'bg-emerald-900/30 border-emerald-700/50 text-emerald-400'
-                : 'bg-slate-700/30 border-slate-600/50 text-slate-300 hover:bg-slate-600/30'
-            }`}
-          >
-            <Calendar className="w-6 h-6 mx-auto mb-2" />
-            <p className="font-medium">Specific Dates</p>
-            <p className="text-xs opacity-75">Select individual dates</p>
-          </button>
-          
-          <button
-            onClick={() => setGenerationMode('date-range')}
-            className={`p-4 rounded-lg border transition-all duration-200 ${
-              generationMode === 'date-range'
-                ? 'bg-emerald-900/30 border-emerald-700/50 text-emerald-400'
-                : 'bg-slate-700/30 border-slate-600/50 text-slate-300 hover:bg-slate-600/30'
-            }`}
-          >
-            <Calendar className="w-6 h-6 mx-auto mb-2" />
-            <p className="font-medium">Date Range</p>
-            <p className="text-xs opacity-75">Select start and end dates</p>
-          </button>
-          
-          <button
-            onClick={() => setGenerationMode('weekly')}
-            className={`p-4 rounded-lg border transition-all duration-200 ${
-              generationMode === 'weekly'
-                ? 'bg-emerald-900/30 border-emerald-700/50 text-emerald-400'
-                : 'bg-slate-700/30 border-slate-600/50 text-slate-300 hover:bg-slate-600/30'
-            }`}
-          >
-            <Calendar className="w-6 h-6 mx-auto mb-2" />
-            <p className="font-medium">Weekly</p>
-            <p className="text-xs opacity-75">Traditional weekly payroll</p>
-          </button>
-        </div>
-
-        {/* Specific Dates Mode */}
-        {generationMode === 'specific-dates' && (
-          <div>
-            <div className="flex items-center gap-4 mb-4">
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Search Available Dates
-                </label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
-                  <input
-                    type="text"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white placeholder-slate-400"
-                    placeholder="Search dates..."
-                  />
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-slate-700/30 p-4 rounded-lg mb-4">
-              <h4 className="font-medium text-white mb-3">Available Dates with Time Entries</h4>
-              {filteredAvailableDates.length > 0 ? (
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-60 overflow-y-auto">
-                  {filteredAvailableDates.map((date) => (
-                    <div
-                      key={date.entry_date}
-                      className={`p-3 rounded-lg border cursor-pointer transition-all duration-200 ${
-                        selectedDates.includes(date.entry_date)
-                          ? 'bg-emerald-900/30 border-emerald-700/50 text-emerald-400'
-                          : 'bg-slate-800/50 border-slate-600/50 text-slate-300 hover:bg-slate-700/50'
-                      }`}
-                      onClick={() => handleDateToggle(date.entry_date)}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-medium">{formatDate(date.entry_date)}</p>
-                          <p className="text-xs opacity-75">
-                            {date.user_count} users • {date.total_entries} entries
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              previewTimeEntries(date.entry_date);
-                            }}
-                            className="text-blue-400 hover:text-blue-300 p-1 rounded hover:bg-blue-900/30"
-                            title="Preview Time Entries"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          {selectedDates.includes(date.entry_date) && (
-                            <CheckCircle className="w-4 h-4 text-emerald-400" />
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-slate-400 text-center py-4">
-                  {searchTerm ? 'No dates match your search.' : 'No available dates with time entries found.'}
-                </p>
-              )}
-            </div>
-            
-            {selectedDates.length > 0 && (
-              <div className="bg-emerald-900/20 p-3 rounded-lg border border-emerald-800/50">
-                <p className="text-emerald-400 text-sm">
-                  Selected {selectedDates.length} date{selectedDates.length > 1 ? 's' : ''}: {selectedDates.map(formatDate).join(', ')}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Date Range Mode */}
-        {generationMode === 'date-range' && (
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                Start Date
-              </label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                End Date
-              </label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Weekly Mode */}
-        {generationMode === 'weekly' && (
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">
-              Week Start Date
-            </label>
-            <input
-              type="date"
-              value={weekStart}
-              onChange={(e) => setWeekStart(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white"
-            />
-          </div>
-        )}
-
-        <div className="flex gap-4 mt-6">
-          <button
-            onClick={generatePayslips}
-            disabled={generating || 
-              (generationMode === 'specific-dates' && selectedDates.length === 0) ||
-              (generationMode === 'date-range' && (!startDate || !endDate)) ||
-              (generationMode === 'weekly' && !weekStart)
-            }
-            className="bg-gradient-to-r from-emerald-500 to-green-600 text-white px-6 py-3 rounded-lg font-medium hover:from-emerald-600 hover:to-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-2 shadow-lg"
-          >
-            <Play className="w-4 h-4" />
-            {generating ? 'Generating...' : 'Generate Payslips'}
-          </button>
-          
-          <button
-            onClick={releasePayslips}
-            disabled={pendingCount === 0}
-            className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:from-blue-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-2 shadow-lg"
-          >
-            <FileText className="w-4 h-4" />
-            Release Payslips ({pendingCount})
-          </button>
-        </div>
-      </div>
-
-      {/* Summary Cards */}
+      {/* Statistics Cards */}
       <div className="grid md:grid-cols-4 gap-4 mb-6">
         <div className="bg-slate-800/90 backdrop-blur-sm rounded-xl p-4 shadow-lg border border-slate-700/50">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-slate-400">Total Payslips</p>
-              <p className="text-2xl font-bold text-white">{filteredPayrollData.length}</p>
+              <p className="text-2xl font-bold text-white">{totalPayslips}</p>
             </div>
             <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/20 p-3 rounded-lg">
               <FileText className="w-6 h-6 text-blue-400" />
@@ -714,7 +474,7 @@ export function PayrollReports() {
         <div className="bg-slate-800/90 backdrop-blur-sm rounded-xl p-4 shadow-lg border border-slate-700/50">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-400">Total Amount</p>
+              <p className="text-sm text-slate-400">Total Salary</p>
               <p className="text-2xl font-bold text-emerald-400">{formatCurrency(totalSalary)}</p>
             </div>
             <div className="bg-gradient-to-br from-emerald-500/20 to-green-600/20 p-3 rounded-lg">
@@ -738,11 +498,173 @@ export function PayrollReports() {
         <div className="bg-slate-800/90 backdrop-blur-sm rounded-xl p-4 shadow-lg border border-slate-700/50">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-400">Released</p>
-              <p className="text-2xl font-bold text-orange-400">{releasedCount}</p>
+              <p className="text-sm text-slate-400">Overtime Hours</p>
+              <p className="text-2xl font-bold text-orange-400">{totalOvertimeHours.toFixed(1)}h</p>
             </div>
             <div className="bg-gradient-to-br from-orange-500/20 to-orange-600/20 p-3 rounded-lg">
-              <Users className="w-6 h-6 text-orange-400" />
+              <TrendingUp className="w-6 h-6 text-orange-400" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Controls Section */}
+      <div className="bg-slate-800/90 backdrop-blur-sm rounded-xl p-6 mb-6 shadow-lg border border-slate-700/50">
+        <h3 className="text-lg font-semibold text-white mb-4">Payroll Controls</h3>
+        
+        <div className="grid lg:grid-cols-2 gap-6">
+          {/* Date Selection */}
+          <div>
+            <h4 className="text-md font-medium text-white mb-3 flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-emerald-400" />
+              Select Dates
+            </h4>
+            <div className="bg-slate-700/30 p-4 rounded-lg border border-slate-600/50 max-h-60 overflow-y-auto">
+              {availableDates.length > 0 ? (
+                <div className="space-y-2">
+                  {availableDates.map((dateInfo) => (
+                    <label key={dateInfo.entry_date} className="flex items-center gap-3 p-2 hover:bg-slate-600/30 rounded-lg transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={selectedDates.includes(dateInfo.entry_date)}
+                        onChange={() => handleDateToggle(dateInfo.entry_date)}
+                        className="rounded border-slate-600 text-emerald-600 focus:ring-emerald-500 bg-slate-700/50"
+                      />
+                      <div className="flex-1">
+                        <span className="text-white font-medium">{formatDate(dateInfo.entry_date)}</span>
+                        <div className="text-xs text-slate-400">
+                          {dateInfo.user_count} users • {dateInfo.total_entries} entries
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-slate-400 text-center py-4">No dates with time entries found</p>
+              )}
+            </div>
+          </div>
+
+          {/* User Selection */}
+          <div>
+            <h4 className="text-md font-medium text-white mb-3 flex items-center gap-2">
+              <Users className="w-4 h-4 text-blue-400" />
+              Select Users (Optional)
+            </h4>
+            
+            {/* Department Filter */}
+            <div className="mb-3">
+              <select
+                value={selectedDepartment}
+                onChange={(e) => setSelectedDepartment(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white text-sm"
+              >
+                <option value="">All Departments</option>
+                {DEPARTMENTS.map(dept => (
+                  <option key={dept} value={dept}>{dept}</option>
+                ))}
+              </select>
+            </div>
+            
+            <div className="bg-slate-700/30 p-4 rounded-lg border border-slate-600/50 max-h-48 overflow-y-auto">
+              {filteredUsers.length > 0 ? (
+                <div className="space-y-2">
+                  <label className="flex items-center gap-3 p-2 hover:bg-slate-600/30 rounded-lg transition-colors font-medium text-emerald-400">
+                    <input
+                      type="checkbox"
+                      checked={selectedUsers.length === filteredUsers.length}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedUsers(filteredUsers.map(user => user.id));
+                        } else {
+                          setSelectedUsers([]);
+                        }
+                      }}
+                      className="rounded border-slate-600 text-emerald-600 focus:ring-emerald-500 bg-slate-700/50"
+                    />
+                    <span>Select All ({filteredUsers.length})</span>
+                  </label>
+                  {filteredUsers.map((user) => (
+                    <label key={user.id} className="flex items-center gap-3 p-2 hover:bg-slate-600/30 rounded-lg transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={selectedUsers.includes(user.id)}
+                        onChange={() => handleUserToggle(user.id)}
+                        className="rounded border-slate-600 text-emerald-600 focus:ring-emerald-500 bg-slate-700/50"
+                      />
+                      <div className="flex-1">
+                        <span className="text-white">{user.username}</span>
+                        <div className="text-xs text-slate-400">{user.department}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-slate-400 text-center py-4">
+                  {selectedDepartment ? `No active users in ${selectedDepartment}` : 'No active users found'}
+                </p>
+              )}
+            </div>
+            
+            {selectedUsers.length === 0 && (
+              <p className="text-xs text-slate-400 mt-2">
+                Leave empty to generate for all users with time entries
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex gap-4 mt-6 pt-4 border-t border-slate-700/50">
+          <button
+            onClick={generatePayslips}
+            disabled={generating || selectedDates.length === 0}
+            className="bg-gradient-to-r from-emerald-500 to-green-600 text-white px-6 py-3 rounded-lg font-medium hover:from-emerald-600 hover:to-green-700 disabled:opacity-50 btn-enhanced flex items-center gap-2 shadow-lg"
+          >
+            <FileText className="w-4 h-4" />
+            {generating ? 'Generating...' : 'Generate Payslips'}
+          </button>
+          
+          <button
+            onClick={releasePayslips}
+            disabled={releasing || selectedDates.length === 0}
+            className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:from-blue-600 hover:to-blue-700 disabled:opacity-50 btn-enhanced flex items-center gap-2 shadow-lg"
+          >
+            <CheckCircle className="w-4 h-4" />
+            {releasing ? 'Releasing...' : 'Release Payslips'}
+          </button>
+        </div>
+      </div>
+
+      {/* Important Notes */}
+      <div className="grid md:grid-cols-2 gap-4 mb-6">
+        {/* Important Note */}
+        <div className="bg-orange-900/20 p-4 rounded-lg border border-orange-800/50">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-orange-400 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-orange-400 mb-1">Overtime Pay Policy</p>
+              <p className="text-xs text-orange-300">
+                Overtime pay should only be added when the employee has submitted an overtime request 
+                that was approved by an administrator. Check the overtime requests section to verify 
+                approval before adding overtime compensation.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-blue-900/20 p-4 rounded-lg border border-blue-800/50">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-blue-400 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-blue-400 mb-1">Payroll Calculation Rules</p>
+              <ul className="text-xs text-blue-300 space-y-1">
+                <li>• Work hours only count from 7:00 AM onwards</li>
+                <li>• Base pay is capped at ₱200 for 8.5 hours (₱23.53/hour)</li>
+                <li>• Overtime pay (₱35/hour) only applies to approved overtime requests</li>
+                <li>• Late clock-in (after 7:00 AM) incurs undertime deduction</li>
+                <li>• Overtime hours are calculated but pay requires manual approval</li>
+              </ul>
             </div>
           </div>
         </div>
@@ -750,12 +672,9 @@ export function PayrollReports() {
 
       {/* Search and Filter */}
       {filteredPayrollData.length > 0 && (
-        <div className="bg-slate-800/90 backdrop-blur-sm rounded-xl p-6 mb-6 shadow-lg border border-slate-700/50">
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                Search Employees
-              </label>
+        <div className="bg-slate-800/90 backdrop-blur-sm rounded-xl p-4 mb-6 shadow-lg border border-slate-700/50">
+          <div className="flex gap-4">
+            <div className="flex-1">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
                 <input
@@ -763,20 +682,16 @@ export function PayrollReports() {
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white placeholder-slate-400"
-                  placeholder="Search by name or department..."
+                  placeholder="Search by employee name or department..."
                 />
               </div>
             </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                Filter by Department
-              </label>
+            <div className="w-48">
               <div className="relative">
                 <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
                 <select
-                  value={departmentFilter}
-                  onChange={(e) => setDepartmentFilter(e.target.value)}
+                  value={selectedDepartment}
+                  onChange={(e) => setSelectedDepartment(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white"
                 >
                   <option value="">All Departments</option>
@@ -790,37 +705,6 @@ export function PayrollReports() {
         </div>
       )}
 
-      {/* Important Note */}
-      <div className="bg-orange-900/20 p-4 rounded-lg mb-6 border border-orange-800/50">
-        <div className="flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-orange-400 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium text-orange-400 mb-1">Overtime Pay Policy</p>
-            <p className="text-xs text-orange-300">
-              Overtime pay should only be added when the employee has submitted an overtime request 
-              that was approved by an administrator. Check the overtime requests section to verify 
-              approval before adding overtime compensation.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-blue-900/20 p-4 rounded-lg mb-6 border border-blue-800/50">
-        <div className="flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-blue-400 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium text-blue-400 mb-1">Payroll Calculation Rules</p>
-            <ul className="text-xs text-blue-300 space-y-1">
-              <li>• Work hours only count from 7:00 AM onwards</li>
-              <li>• Base pay is capped at ₱200 for 8.5 hours (₱23.53/hour)</li>
-              <li>• Overtime pay (₱35/hour) only applies to approved overtime requests</li>
-              <li>• Late clock-in (after 7:00 AM) incurs undertime deduction</li>
-              <li>• Overtime hours are calculated but pay requires manual approval</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-
       {/* Payroll Data Table */}
       {loading ? (
         <div className="text-center py-12">
@@ -830,15 +714,16 @@ export function PayrollReports() {
       ) : filteredPayrollData.length > 0 ? (
         <div className="bg-slate-800/90 backdrop-blur-sm rounded-xl shadow-lg overflow-hidden border border-slate-700/50">
           <div className="bg-slate-700/50 px-6 py-4 border-b border-slate-600/50">
-            <h3 className="text-lg font-semibold text-white">Payroll Entries</h3>
-            <p className="text-sm text-slate-400">
-              Showing {filteredPayrollData.length} entries • 
-              Pending: {pendingCount} • Released: {releasedCount}
+            <h3 className="text-lg font-semibold text-white">
+              Payroll Report • {filteredPayrollData.length} entries
+            </h3>
+            <p className="text-sm text-slate-400 mt-1">
+              Selected dates: {selectedDates.map(date => formatDate(date)).join(', ')}
             </p>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full">
-              <thead className="bg-slate-700/30">
+              <thead className="bg-slate-700/50">
                 <tr>
                   <th className="text-left py-3 px-4 font-semibold text-slate-300">Employee</th>
                   <th className="text-left py-3 px-4 font-semibold text-slate-300">Date</th>
@@ -862,12 +747,7 @@ export function PayrollReports() {
                       </div>
                     </td>
                     <td className="py-3 px-4">
-                      <p className="text-white">
-                        {entry.week_start === entry.week_end 
-                          ? formatDate(entry.week_start)
-                          : `${formatDate(entry.week_start)} - ${formatDate(entry.week_end)}`
-                        }
-                      </p>
+                      <p className="text-white">{formatDate(entry.week_start)}</p>
                     </td>
                     <td className="py-3 px-4">
                       <div className="text-sm">
@@ -877,28 +757,28 @@ export function PayrollReports() {
                     </td>
                     <td className="py-3 px-4 text-right">
                       <div>
-                        <p className="text-white">{entry.total_hours.toFixed(2)}h</p>
-                        {entry.overtime_hours > 0 && (
-                          <p className="text-sm text-orange-400">+{entry.overtime_hours.toFixed(2)}h OT</p>
+                        <p className="text-white">{(parseFloat(entry.total_hours) || 0).toFixed(2)}h</p>
+                        {(parseFloat(entry.overtime_hours) || 0) > 0 && (
+                          <p className="text-sm text-orange-400">+{(parseFloat(entry.overtime_hours) || 0).toFixed(2)}h OT</p>
                         )}
-                        {entry.undertime_hours > 0 && (
-                          <p className="text-sm text-red-400">-{entry.undertime_hours.toFixed(2)}h UT</p>
+                        {(parseFloat(entry.undertime_hours) || 0) > 0 && (
+                          <p className="text-sm text-red-400">-{(parseFloat(entry.undertime_hours) || 0).toFixed(2)}h UT</p>
                         )}
                       </div>
                     </td>
                     <td className="py-3 px-4 text-right text-white">
-                      {formatCurrency(entry.base_salary)}
+                      {formatCurrency(parseFloat(entry.base_salary) || 0)}
                     </td>
                     <td className="py-3 px-4 text-right text-emerald-400">
-                      {entry.overtime_pay > 0 ? formatCurrency(entry.overtime_pay) : '-'}
+                      {(parseFloat(entry.overtime_pay) || 0) > 0 ? formatCurrency(parseFloat(entry.overtime_pay) || 0) : '-'}
                     </td>
                     <td className="py-3 px-4 text-right text-red-400">
-                      {(entry.undertime_deduction + entry.staff_house_deduction) > 0 
-                        ? formatCurrency(entry.undertime_deduction + entry.staff_house_deduction) 
+                      {((parseFloat(entry.undertime_deduction) || 0) + (parseFloat(entry.staff_house_deduction) || 0)) > 0 
+                        ? formatCurrency((parseFloat(entry.undertime_deduction) || 0) + (parseFloat(entry.staff_house_deduction) || 0)) 
                         : '-'}
                     </td>
                     <td className="py-3 px-4 text-right">
-                      <p className="font-bold text-white">{formatCurrency(entry.total_salary)}</p>
+                      <p className="font-bold text-white">{formatCurrency(parseFloat(entry.total_salary) || 0)}</p>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -906,13 +786,13 @@ export function PayrollReports() {
                           ? 'bg-emerald-900/20 text-emerald-400 border border-emerald-800/50'
                           : 'bg-yellow-900/20 text-yellow-400 border border-yellow-800/50'
                       }`}>
-                        {entry.status}
+                        {entry.status === 'released' ? 'Released' : 'Pending'}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <button
-                        onClick={() => handleEditStart(entry)}
-                        className="text-blue-400 hover:text-blue-300 p-1 rounded hover:bg-blue-900/30 transition-all duration-200"
+                        onClick={() => handleEditEntry(entry)}
+                        className="text-blue-400 hover:text-blue-300 p-1.5 rounded-lg hover:bg-blue-900/30 transition-all duration-200"
                         title="Edit Entry"
                       >
                         <Edit3 className="w-4 h-4" />
@@ -924,261 +804,204 @@ export function PayrollReports() {
             </table>
           </div>
         </div>
-      ) : (
+      ) : selectedDates.length > 0 ? (
         <div className="text-center py-12">
           <div className="bg-slate-700/30 p-4 rounded-full w-20 h-20 mx-auto mb-4 flex items-center justify-center">
             <FileText className="w-10 h-10 text-slate-500" />
           </div>
           <h3 className="text-lg font-medium text-white mb-2">No Payroll Data</h3>
           <p className="text-slate-400">
-            {generationMode === 'specific-dates' && selectedDates.length === 0
-              ? 'Select dates to view or generate payslips.'
-              : generationMode === 'date-range' && (!startDate || !endDate)
-              ? 'Select start and end dates to view payroll data.'
-              : generationMode === 'weekly' && !weekStart
-              ? 'Select a week to view payroll data.'
-              : 'No payroll data found for the selected period. Generate payslips first.'}
+            No payroll records found for the selected dates. Generate payslips first.
+          </p>
+        </div>
+      ) : (
+        <div className="text-center py-12">
+          <div className="bg-slate-700/30 p-4 rounded-full w-20 h-20 mx-auto mb-4 flex items-center justify-center">
+            <Calendar className="w-10 h-10 text-slate-500" />
+          </div>
+          <h3 className="text-lg font-medium text-white mb-2">Select Dates</h3>
+          <p className="text-slate-400">
+            Choose dates from the available options to view or generate payroll data.
           </p>
         </div>
       )}
 
-      {/* Time Entries Preview Modal */}
-      {showPreviewModal && (
+      {/* Edit Modal */}
+      {showEditModal && editingEntry && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-800/95 backdrop-blur-sm rounded-2xl shadow-xl p-6 w-full max-w-4xl max-h-[90vh] overflow-hidden border border-slate-700/50">
-            <div className="flex items-center justify-between mb-6">
+          <div className="bg-slate-800/95 backdrop-blur-sm rounded-2xl shadow-xl p-6 w-full max-w-2xl border border-slate-700/50 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center gap-3 mb-6">
+              <Edit3 className="w-6 h-6 text-blue-400" />
               <div>
-                <h3 className="text-xl font-semibold text-white">Time Entries Preview</h3>
-                <p className="text-slate-400">{formatDate(previewDate)} • {previewEntries.length} entries</p>
+                <h3 className="text-xl font-semibold text-white">Edit Payroll Entry</h3>
+                <p className="text-slate-400">{editingEntry.username} - {formatDate(editingEntry.week_start)}</p>
               </div>
+            </div>
+            
+            <div className="grid md:grid-cols-2 gap-6 mb-6">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Clock In Time
+                </label>
+                <input
+                  type="datetime-local"
+                  value={editForm.clockIn}
+                  onChange={(e) => setEditForm({ ...editForm, clockIn: e.target.value })}
+                  className="w-full p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Clock Out Time
+                </label>
+                <input
+                  type="datetime-local"
+                  value={editForm.clockOut}
+                  onChange={(e) => setEditForm({ ...editForm, clockOut: e.target.value })}
+                  className="w-full p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white"
+                />
+              </div>
+            </div>
+
+            <div className="mb-6">
               <button
-                onClick={() => setShowPreviewModal(false)}
-                className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700/50"
+                onClick={calculateFromTimes}
+                className="bg-gradient-to-r from-purple-500 to-purple-600 text-white px-4 py-2 rounded-lg font-medium hover:from-purple-600 hover:to-purple-700 transition-all duration-200 flex items-center gap-2"
               >
-                <X className="w-5 h-5" />
+                <Eye className="w-4 h-4" />
+                Calculate from Times
               </button>
             </div>
             
-            <div className="overflow-y-auto max-h-96">
-              <table className="min-w-full">
-                <thead className="bg-slate-700/50 sticky top-0">
-                  <tr>
-                    <th className="text-left py-3 px-4 font-semibold text-slate-300">Employee</th>
-                    <th className="text-left py-3 px-4 font-semibold text-slate-300">Department</th>
-                    <th className="text-left py-3 px-4 font-semibold text-slate-300">Clock In</th>
-                    <th className="text-left py-3 px-4 font-semibold text-slate-300">Clock Out</th>
-                    <th className="text-center py-3 px-4 font-semibold text-slate-300">Overtime</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-700/50">
-                  {previewEntries.map((entry) => (
-                    <tr key={entry.id} className="hover:bg-slate-700/30">
-                      <td className="py-3 px-4 text-white">{entry.username}</td>
-                      <td className="py-3 px-4 text-slate-300">{entry.department}</td>
-                      <td className="py-3 px-4 text-emerald-400">{formatTime(entry.clock_in)}</td>
-                      <td className="py-3 px-4 text-red-400">
-                        {entry.clock_out ? formatTime(entry.clock_out) : 'Still active'}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        {entry.overtime_requested ? (
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            entry.overtime_approved === null
-                              ? 'bg-yellow-900/20 text-yellow-400'
-                              : entry.overtime_approved
-                              ? 'bg-emerald-900/20 text-emerald-400'
-                              : 'bg-red-900/20 text-red-400'
-                          }`}>
-                            {entry.overtime_approved === null ? 'Pending' : entry.overtime_approved ? 'Approved' : 'Rejected'}
-                          </span>
-                        ) : (
-                          <span className="text-slate-500">-</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Modal */}
-      {editingEntry && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-800/95 backdrop-blur-sm rounded-2xl shadow-xl p-6 w-full max-w-2xl border border-slate-700/50 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6">
+            <div className="grid md:grid-cols-2 gap-6 mb-6">
               <div>
-                <h3 className="text-xl font-semibold text-white">Edit Payroll Entry</h3>
-                <p className="text-slate-400">{editingEntry.username} • {formatDate(editingEntry.week_start)}</p>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Total Hours
+                </label>
+                <input
+                  type="number"
+                  value={editForm.totalHours}
+                  onChange={(e) => setEditForm({ ...editForm, totalHours: parseFloat(e.target.value) || 0 })}
+                  className="w-full p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white"
+                  step="0.01"
+                  min="0"
+                />
               </div>
-              <button
-                onClick={() => setEditingEntry(null)}
-                className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700/50"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Overtime Hours
+                </label>
+                <input
+                  type="number"
+                  value={editForm.overtimeHours}
+                  onChange={(e) => setEditForm({ ...editForm, overtimeHours: parseFloat(e.target.value) || 0 })}
+                  className="w-full p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white"
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Undertime Hours
+                </label>
+                <input
+                  type="number"
+                  value={editForm.undertimeHours}
+                  onChange={(e) => setEditForm({ ...editForm, undertimeHours: parseFloat(e.target.value) || 0 })}
+                  className="w-full p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white"
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Base Salary (₱)
+                </label>
+                <input
+                  type="number"
+                  value={editForm.baseSalary}
+                  onChange={(e) => setEditForm({ ...editForm, baseSalary: parseFloat(e.target.value) || 0 })}
+                  className="w-full p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white"
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Overtime Pay (₱)
+                </label>
+                <input
+                  type="number"
+                  value={editForm.overtimePay}
+                  onChange={(e) => setEditForm({ ...editForm, overtimePay: parseFloat(e.target.value) || 0 })}
+                  className="w-full p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white"
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Undertime Deduction (₱)
+                </label>
+                <input
+                  type="number"
+                  value={editForm.undertimeDeduction}
+                  onChange={(e) => setEditForm({ ...editForm, undertimeDeduction: parseFloat(e.target.value) || 0 })}
+                  className="w-full p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white"
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Staff House Deduction (₱)
+                </label>
+                <input
+                  type="number"
+                  value={editForm.staffHouseDeduction}
+                  onChange={(e) => setEditForm({ ...editForm, staffHouseDeduction: parseFloat(e.target.value) || 0 })}
+                  className="w-full p-3 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white"
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Total Salary (₱)
+                </label>
+                <div className="w-full p-3 bg-slate-600/30 border border-slate-600 rounded-lg text-white font-bold">
+                  {formatCurrency(
+                    editForm.baseSalary + editForm.overtimePay - editForm.undertimeDeduction - editForm.staffHouseDeduction
+                  )}
+                </div>
+              </div>
             </div>
-
-            <div className="space-y-6">
-              {/* Time Section */}
-              <div className="bg-slate-700/30 p-4 rounded-lg">
-                <h4 className="font-medium text-white mb-4">Time Information</h4>
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Clock In
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={editForm.clockIn}
-                      onChange={(e) => setEditForm({ ...editForm, clockIn: e.target.value })}
-                      className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Clock Out
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={editForm.clockOut}
-                      onChange={(e) => setEditForm({ ...editForm, clockOut: e.target.value })}
-                      className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white"
-                    />
-                  </div>
-                </div>
-                <button
-                  onClick={calculateFromTimes}
-                  className="mt-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:from-blue-600 hover:to-blue-700 transition-all duration-200"
-                >
-                  Calculate from Times
-                </button>
-              </div>
-
-              {/* Hours Section */}
-              <div className="bg-slate-700/30 p-4 rounded-lg">
-                <h4 className="font-medium text-white mb-4">Hours Breakdown</h4>
-                <div className="grid md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Total Hours
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={editForm.totalHours}
-                      onChange={(e) => setEditForm({ ...editForm, totalHours: parseFloat(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Overtime Hours
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={editForm.overtimeHours}
-                      onChange={(e) => setEditForm({ ...editForm, overtimeHours: parseFloat(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Undertime Hours
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={editForm.undertimeHours}
-                      onChange={(e) => setEditForm({ ...editForm, undertimeHours: parseFloat(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Salary Section */}
-              <div className="bg-slate-700/30 p-4 rounded-lg">
-                <h4 className="font-medium text-white mb-4">Salary Breakdown</h4>
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Base Salary (₱)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={editForm.baseSalary}
-                      onChange={(e) => setEditForm({ ...editForm, baseSalary: parseFloat(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Overtime Pay (₱)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={editForm.overtimePay}
-                      onChange={(e) => setEditForm({ ...editForm, overtimePay: parseFloat(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Undertime Deduction (₱)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={editForm.undertimeDeduction}
-                      onChange={(e) => setEditForm({ ...editForm, undertimeDeduction: parseFloat(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Staff House Deduction (₱)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={editForm.staffHouseDeduction}
-                      onChange={(e) => setEditForm({ ...editForm, staffHouseDeduction: parseFloat(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-white"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Total Calculation */}
-              <div className="bg-emerald-900/20 p-4 rounded-lg border border-emerald-800/50">
-                <div className="flex justify-between items-center">
-                  <span className="text-emerald-400 font-medium">Total Salary:</span>
-                  <span className="text-2xl font-bold text-emerald-400">
-                    {formatCurrency(editForm.baseSalary + editForm.overtimePay - editForm.undertimeDeduction - editForm.staffHouseDeduction)}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex gap-4">
-                <button
-                  onClick={() => setEditingEntry(null)}
-                  className="flex-1 bg-slate-700/50 text-slate-300 py-3 px-4 rounded-lg font-medium hover:bg-slate-600/50 transition-all duration-200"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleEditSave}
-                  className="flex-1 bg-gradient-to-r from-emerald-500 to-green-600 text-white py-3 px-4 rounded-lg font-medium hover:from-emerald-600 hover:to-green-700 transition-all duration-200 flex items-center justify-center gap-2"
-                >
-                  <Save className="w-4 h-4" />
-                  Save Changes
-                </button>
-              </div>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditingEntry(null);
+                }}
+                className="flex-1 bg-slate-700/50 text-slate-300 py-3 px-4 rounded-lg font-medium hover:bg-slate-600/50 transition-all duration-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveEditedEntry}
+                className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:from-blue-600 hover:to-blue-700 transition-all duration-200 flex items-center justify-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                Save Changes
+              </button>
             </div>
           </div>
         </div>
