@@ -52,10 +52,10 @@ export async function calculateDailyPayroll(userId, date) {
       const clockIn = new Date(entry.clock_in);
       let clockOut = entry.clock_out ? new Date(entry.clock_out) : null;
 
-      // Skip entries without clock_out when generating payroll
+      // If no clock_out, use current time for calculation
       if (!clockOut) {
-        console.log(`Skipping entry ${entry.id} - no clock_out time`);
-        return; // Skip this entry
+        clockOut = new Date();
+        console.log(`Using current time as clock_out for entry ${entry.id}: ${clockOut}`);
       }
 
       // Define shift start time (7:00 AM)
@@ -74,10 +74,10 @@ export async function calculateDailyPayroll(userId, date) {
       
       console.log(`Entry ${entry.id}: workedHours=${workedHours}`);
       
-      // Only count positive worked hours
-      if (workedHours <= 0) {
-        console.log(`Skipping entry ${entry.id} - no valid work time`);
-        return; // Skip if no valid work time
+      // Count all worked hours, even if small
+      if (workedHours < 0) {
+        workedHours = 0;
+        console.log(`Adjusted negative hours to 0 for entry ${entry.id}`);
       }
       
       // Track first clock in and last clock out
@@ -103,16 +103,15 @@ export async function calculateDailyPayroll(userId, date) {
         }
       }
       
-      // Add to total hours - work hours are already calculated from 7:00 AM
-      // Cap at 8.5 hours per day for base pay calculation
-      const dailyBaseHours = Math.min(workedHours, standardHoursPerDay);
-      totalHours += dailyBaseHours;
+      // Add to total hours - don't cap here, cap only for base salary calculation
+      totalHours += workedHours;
     });
 
     console.log(`Final calculation for user ${userId}: totalHours=${totalHours}, overtimeHours=${overtimeHours}, undertimeHours=${undertimeHours}`);
 
     // Calculate base salary (capped at ₱200 for 8.5 hours)
-    const baseSalary = Math.min(totalHours * hourlyRate, maxBasePay);
+    const baseSalaryHours = Math.min(totalHours, standardHoursPerDay);
+    const baseSalary = baseSalaryHours * hourlyRate;
     const overtimePay = overtimeHours * 35;
     const undertimeDeduction = undertimeHours * hourlyRate;
     const staffHouseDeduction = userData.staff_house ? (250 / 5) : 0; // Daily portion of weekly deduction
@@ -120,8 +119,6 @@ export async function calculateDailyPayroll(userId, date) {
     const totalSalary = baseSalary + overtimePay - undertimeDeduction - staffHouseDeduction;
 
     const result = {
-    }
-    return {
       totalHours,
       overtimeHours,
       undertimeHours,
@@ -182,7 +179,7 @@ export async function generatePayslipsForSpecificDays(selectedDates, userIds = n
         
         const payroll = await calculateDailyPayroll(user.id, date);
         
-        if (payroll && payroll.totalHours > 0) {
+        if (payroll && (payroll.totalHours > 0 || payroll.baseSalary > 0)) {
           console.log(`Valid payroll calculated for ${user.username} on ${date}:`, payroll);
           
           // Check if payslip already exists for this user and date
@@ -220,7 +217,7 @@ export async function generatePayslipsForSpecificDays(selectedDates, userIds = n
             console.log(`Payslip already exists for ${user.username} on ${date}`);
           }
         } else {
-          console.log(`No valid payroll data for ${user.username} on ${date} (totalHours: ${payroll?.totalHours || 0})`);
+          console.log(`No valid payroll data for ${user.username} on ${date} (totalHours: ${payroll?.totalHours || 0}, baseSalary: ${payroll?.baseSalary || 0})`);
         }
       }
     }
@@ -265,7 +262,7 @@ export async function generatePayslipsForDateRange(startDate, endDate) {
 
         if (hasEntry.length > 0) {
           const payroll = await calculateDailyPayroll(user.id, date);
-          if (payroll && payroll.totalHours > 0) {
+          if (payroll && (payroll.totalHours > 0 || payroll.baseSalary > 0)) {
             // Check if payslip already exists for this user and date
             const [existing] = await pool.execute(
               'SELECT id FROM payslips WHERE user_id = ? AND week_start = ? AND week_end = ?',
