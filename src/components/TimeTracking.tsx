@@ -795,7 +795,7 @@ export function TimeTracking() {
                       <span className="text-sm font-medium text-orange-400">Overtime Rate</span>
                     </div>
                     <p className="text-white font-semibold">₱35/hour</p>
-                    <p className="text-xs text-slate-400 mt-1">After 4:00 PM</p>
+                    <p className="text-xs text-slate-400 mt-1">After 3:30 PM</p>
                   </div>
                   
                   <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-600/30">
@@ -803,7 +803,7 @@ export function TimeTracking() {
                       <AlertCircle className="w-4 h-4 text-red-400" />
                       <span className="text-sm font-medium text-red-400">Late Policy</span>
                     </div>
-                    <p className="text-white font-semibold">-₱25/hour</p>
+                    <p className="text-white font-semibold">-₱23.53/hour</p>
                     <p className="text-xs text-slate-400 mt-1">After 7:00 AM</p>
                   </div>
                   
