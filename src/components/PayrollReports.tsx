@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Calendar, Download, FileText, Users, PhilippinePeso, Clock, Edit3, Save, X, AlertTriangle, CheckCircle, Filter, Search, Eye, Trash2 } from 'lucide-react';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import { jsPDF } from 'jspdf';
+import { autoTable } from 'jspdf-autotable';
 
 interface PayrollEntry {
   id: number;
@@ -418,7 +418,7 @@ export function PayrollReports() {
       entry.status
     ]);
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       head: [['Employee', 'Department', 'Hours', 'OT Hours', 'Base Pay', 'OT Pay', 'Undertime', 'Staff House', 'Total', 'Status']],
       body: tableData,
       startY: 40,
