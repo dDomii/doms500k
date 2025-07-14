@@ -120,6 +120,7 @@ export async function calculateDailyPayroll(userId, date) {
     const totalSalary = baseSalary + overtimePay - undertimeDeduction - staffHouseDeduction;
 
     const result = {
+    }
     return {
       totalHours,
       overtimeHours,
