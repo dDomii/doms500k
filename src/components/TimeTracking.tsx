@@ -795,7 +795,7 @@ export function TimeTracking() {
                       <span className="text-sm font-medium text-orange-400">Overtime Rate</span>
                     </div>
                     <p className="text-white font-semibold">₱35/hour</p>
-                    <p className="text-xs text-slate-400 mt-1">After 3:30 PM</p>
+                    <p className="text-xs text-slate-400 mt-1">After 4:00 PM</p>
                   </div>
                   
                   <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-600/30">
@@ -803,7 +803,7 @@ export function TimeTracking() {
                       <AlertCircle className="w-4 h-4 text-red-400" />
                       <span className="text-sm font-medium text-red-400">Late Policy</span>
                     </div>
-                    <p className="text-white font-semibold">-₱23.53/hour</p>
+                    <p className="text-white font-semibold">-₱25/hour</p>
                     <p className="text-xs text-slate-400 mt-1">After 7:00 AM</p>
                   </div>
                   
@@ -832,9 +832,10 @@ export function TimeTracking() {
                     <div>
                       <p className="text-sm font-medium text-blue-400 mb-2">Important Notes</p>
                       <ul className="text-xs text-blue-300 space-y-1">
-                        <li>• Regular shift is 8 hours work with 30-minute unpaid break = ₱200/day</li>
+                        <li>• Base pay is capped at ₱200 for 8.5 hours of work</li>
+                        <li>• Work hours only count from 7:00 AM onwards</li>
                         <li>• Late clock-in (after 7:00 AM) incurs hourly deductions</li>
-                        <li>• Overtime starts after 4:00 PM with 30-minute grace period</li>
+                        <li>• Overtime starts at 3:30 PM and requires approval</li>
                         <li>• All overtime must be pre-approved by administration</li>
                       </ul>
                     </div>
