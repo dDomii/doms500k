@@ -175,6 +175,30 @@ export async function generatePayslipsForSpecificDays(selectedDates, userIds = n
       
       // Generate payslip for each selected date
       for (const date of selectedDates) {
+
+        for (const date of selectedDates) {
+  const formattedDate = toMySQLDate(date); // <<< ADD THIS
+
+  const payroll = await calculateDailyPayroll(user.id, formattedDate); // <<< use it here
+
+  // Check if payslip already exists
+  const [existing] = await pool.execute(
+    'SELECT id FROM payslips WHERE user_id = ? AND week_start = ? AND week_end = ?',
+    [user.id, formattedDate, formattedDate] // <<< use it here
+  );
+
+  if (existing.length === 0) {
+    const [result] = await pool.execute(
+      `INSERT INTO payslips (...) VALUES (?, ?, ?, ..., ?, ?)`,
+      [
+        user.id, formattedDate, formattedDate, // <<< use formattedDate
+        payroll.totalHours, payroll.overtimeHours, ...
+        payroll.clockInTime, payroll.clockOutTime
+      ]
+    );
+    ...
+  }
+}
         console.log(`Generating payslip for ${user.username} on ${date}`);
         
         const payroll = await calculateDailyPayroll(user.id, date);
